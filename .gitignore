@@ -1,0 +1,30 @@
+# Go
+# コンパイルされた実行可能ファイル
+main
+*.exe
+*.out
+
+# 依存関係 (もし vendor/ を使う場合)
+# vendor/
+
+# OS固有ファイル
+.DS_Store
+Thumbs.db
+._*
+
+# IDE/エディタ設定
+.vscode/
+.idea/
+*.swp
+*~
+
+# ログファイル
+*.log
+
+# 機密情報
+token.json
+backend/credentials.json
+backend/token.json
+
+# 環境変数ファイル (もしあれば)
+# .env

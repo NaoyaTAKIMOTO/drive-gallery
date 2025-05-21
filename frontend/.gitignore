@@ -1,0 +1,32 @@
+# Node.js / npm / yarn / pnpm
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite
+dist/
+.vite/
+*.html # ルートのindex.html以外は無視することが多い (Viteがdistに生成するため)
+
+# TypeScript
+*.tsbuildinfo
+
+# OS固有ファイル
+.DS_Store
+Thumbs.db
+._*
+
+# IDE/エディタ設定
+.vscode/
+.idea/
+*.swp
+*~
+
+# 環境変数ファイル
+.env
+.env.*
+!.env.example # .env.example は含めることが多い
+
+# テスト関連 (もしあれば)
+# coverage/

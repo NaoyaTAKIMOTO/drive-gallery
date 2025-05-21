@@ -1,0 +1,269 @@
+/* Global Resets and Base Styles */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f4f7f6;
+  color: #333;
+  line-height: 1.6;
+}
+
+#root {
+  max-width: 100%; /* Changed from 1280px to allow full width */
+  margin: 0 auto;
+  padding: 0; /* Reset padding, will be handled by page-container */
+  text-align: left; /* Changed from center */
+}
+
+a {
+  color: #007bff;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+h1 {
+  color: #2c3e50;
+  margin-bottom: 1rem;
+}
+
+/* Page Container */
+.page-container {
+  padding: 1.5rem;
+  max-width: 1200px; /* Max width for content area */
+  margin: 0 auto; /* Center content */
+}
+
+/* Folder List Styles */
+.folder-list {
+  list-style: none;
+  padding: 0;
+}
+
+.folder-item {
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  padding: 1rem 1.5rem;
+  transition: box-shadow 0.2s ease-in-out;
+}
+
+.folder-item a {
+  font-size: 1.1rem;
+  font-weight: 500;
+  display: block;
+}
+
+.folder-item:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* File Grid Styles */
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); /* Responsive grid */
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.file-grid-item {
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden; /* Ensures content fits within rounded corners */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  cursor: default; /* Default cursor */
+}
+
+.file-grid-item:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* Make video items look clickable */
+.file-grid-item:has(iframe.media-preview),
+.file-grid-item:has(video.media-preview) {
+  cursor: pointer;
+}
+
+
+/* Media Preview Styles */
+.media-preview {
+  width: 100%;
+  height: 150px; /* Fixed height for previews */
+  object-fit: cover; /* Cover ensures the image fills the space, cropping if necessary */
+  background-color: #f0f0f0; /* Placeholder background */
+  border-bottom: 1px solid #e0e0e0;
+  /* pointer-events: none !important; */ /* Removed as we are using overlay method */
+}
+
+/* Overlay for clickable media items in the grid */
+.media-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%; /* Cover the parent media element (image or iframe wrapper) */
+  background-color: rgba(0,0,0,0); /* Transparent */
+  cursor: pointer;
+  z-index: 5; /* Ensure it's above the media but below other UI like close buttons */
+}
+
+
+video.media-preview, audio.media-preview {
+  object-fit: contain; /* For video/audio, contain is often better to see controls */
+   background-color: #000; /* Black background for video/audio often looks better */
+}
+audio.media-preview {
+    height: auto; /* Audio controls take their own height */
+    padding: 0.5rem 0;
+}
+
+
+.media-preview-placeholder {
+  width: 100%;
+  height: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #f8f9fa;
+  color: #6c757d;
+  border-bottom: 1px solid #e0e0e0;
+  padding: 0.5rem;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.media-preview-placeholder .file-name-placeholder {
+  font-size: 0.8rem;
+  word-break: break-all;
+  margin-top: 0.5rem;
+}
+.media-preview-placeholder .file-type-placeholder {
+  font-size: 0.7rem;
+  color: #888;
+}
+
+
+/* File Name in Grid Item */
+.file-name-grid {
+  padding: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0; /* Reset margin */
+}
+
+/* Breadcrumb Link */
+.breadcrumb-link {
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.breadcrumb-link a {
+  color: #555;
+}
+.breadcrumb-link a:hover {
+  color: #007bff;
+}
+
+/* Loading and Error States (basic styling) */
+.page-container > div[class*="Loading"],
+.page-container > div[class*="Error"] {
+  text-align: center;
+  padding: 2rem;
+  font-size: 1.2rem;
+  color: #555;
+}
+
+/* Selected Video Player Styles */
+.selected-video-container {
+  position: relative; /* For positioning the close button */
+  width: 100%;
+  max-width: 800px; /* Or desired max width for the player */
+  margin: 0 auto 1.5rem auto; /* Center the player and add bottom margin */
+  background-color: #000; /* Black background for the player container */
+  border-radius: 8px; /* Optional: rounded corners for the player */
+  overflow: hidden; /* To contain the iframe and ensure rounded corners apply */
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15); /* Optional: add some shadow for depth */
+}
+
+.selected-video-iframe {
+  display: block; /* Remove extra space below iframe if any */
+  width: 100%;
+  height: 450px; /* Adjust height as needed, or use aspect ratio padding-bottom trick for responsive height */
+  border: none; /* Ensure no border on the iframe itself */
+}
+
+.close-selected-video-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: rgba(0, 0, 0, 0.6); /* Semi-transparent black */
+  color: white;
+  border: none;
+  border-radius: 50%; /* Circular button */
+  width: 32px; /* Button size */
+  height: 32px; /* Button size */
+  font-size: 1.3rem; /* Size of the '×' icon */
+  line-height: 32px; /* Vertically center the '×' */
+  text-align: center; /* Horizontally center the '×' */
+  cursor: pointer;
+  z-index: 10; /* Ensure it's above the iframe content */
+  transition: background-color 0.2s ease;
+}
+
+.close-selected-video-button:hover {
+  background-color: rgba(0, 0, 0, 0.8); /* Darker on hover */
+}
+
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+  .file-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1rem;
+  }
+  .page-container {
+    padding: 1rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+  }
+  .selected-video-iframe {
+    height: 350px; /* Adjust height for smaller screens */
+  }
+}
+
+@media (max-width: 480px) {
+  .file-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); /* Smaller items on very small screens */
+  }
+   .file-name-grid {
+    font-size: 0.8rem;
+  }
+  .selected-video-iframe {
+    height: 250px; /* Adjust height for very small screens */
+  }
+  .close-selected-video-button {
+    width: 28px;
+    height: 28px;
+    line-height: 28px;
+    font-size: 1.1rem;
+  }
+}
+
+/* Ensure Vite's default styles don't interfere if they were more specific */
+/* For example, if there was a more specific #root text-align */
+#root {
+  text-align: left; /* Re-affirm */
+}
