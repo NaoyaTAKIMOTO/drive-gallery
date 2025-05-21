@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'; // Import useNavigate
+import { Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query'; // useQueryClientもここでインポート
 import './App.css';
 
 // Define the structure of a file object based on backend response
@@ -21,56 +22,39 @@ interface DriveFolder {
 
 // --- HomePage Component ---
 function HomePage() {
-  const navigate = useNavigate(); // Initialize useNavigate
-  const [folders, setFolders] = useState<DriveFolder[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchFolders = async () => {
+  const { data: folders, isLoading, error } = useQuery<DriveFolder[], Error>({
+    queryKey: ['folders'],
+    queryFn: async () => {
       console.log('Fetching folders...');
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await fetch('http://localhost:8080/api/folders');
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        }
-        const result = await response.json();
-        setFolders(result.data || []);
-        console.log('Folders fetched successfully.');
-      } catch (e) {
-        if (e instanceof Error) {
-          setError(e.message);
-        } else {
-          setError('An unknown error occurred while fetching folders');
-        }
-        console.error("Failed to fetch folders:", e);
-      } finally {
-        setLoading(false);
+      const response = await fetch('http://localhost:8080/api/folders');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
-    };
+      const result = await response.json();
+      console.log('Folders fetched successfully.');
+      return result.data || [];
+    },
+  });
 
-    fetchFolders();
-  }, []);
-
-  if (loading) {
+  if (isLoading) {
     return <div className="page-container">Loading folders...</div>;
   }
 
   if (error) {
-    return <div className="page-container">Error fetching folders: {error}</div>;
+    return <div className="page-container">Error fetching folders: {error.message}</div>;
   }
 
   return (
     <div className="page-container">
-      <h1>Google Drive Folders</h1>
-      {folders.length === 0 ? (
+      <h1>Luke Avenue</h1>
+      {(folders || []).length === 0 ? (
         <p>No folders found in the root directory.</p>
       ) : (
         <ul className="folder-list">
-          {folders.map((folder) => (
+          {(folders || []).map((folder) => (
             <li key={folder.id} className="folder-item" 
                 onClick={() => {
                   console.log(`Item clicked for folder: ${folder.name}, ID: ${folder.id}`);
@@ -91,10 +75,8 @@ function HomePage() {
 // --- FolderPage Component ---
 function FolderPage() {
   const { folderId } = useParams<{ folderId: string }>();
-  const [files, setFiles] = useState<DriveFile[]>([]);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const queryClient = useQueryClient(); // Initialize useQueryClient
 
   const handleFileClick = (file: DriveFile) => {
     console.log('handleFileClick triggered for file:', file.name, 'ID:', file.id, 'MIME Type:', file.mimeType);
@@ -110,37 +92,48 @@ function FolderPage() {
     setSelectedVideoId(null);
   };
 
-  const fetchFiles = async () => {
-    if (!folderId) return;
-    setLoading(true);
-    setError(null);
-    try {
+  // Fetch files using React Query
+  const { data: files, isLoading: isLoadingFiles, error: filesError } = useQuery<DriveFile[], Error>({
+    queryKey: ['files', folderId],
+    queryFn: async () => {
+      if (!folderId) throw new Error('Folder ID is missing');
       const response = await fetch(`http://localhost:8080/api/files/${folderId}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       const result = await response.json();
-      setFiles(result.data || []);
-    } catch (e) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError('An unknown error occurred while fetching files');
-      }
-      console.error(`Failed to fetch files for folder ${folderId}:`, e);
-    } finally {
-      setLoading(false);
-    }
-  };
+      return result.data || [];
+    },
+    enabled: !!folderId, // Only run query if folderId exists
+  });
 
+  // Fetch folder name using React Query
+  const { data: folderName, isLoading: isLoadingFolderName, error: folderNameError } = useQuery<string, Error>({
+    queryKey: ['folderName', folderId],
+    queryFn: async () => {
+      if (!folderId) throw new Error('Folder ID is missing');
+      const response = await fetch(`http://localhost:8080/api/folder-name/${folderId}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const result = await response.json();
+      return result.name || 'Unknown Folder';
+    },
+    enabled: !!folderId,
+  });
+
+  // WebSocket for real-time updates
   useEffect(() => {
-    fetchFiles();
+    if (!folderId) return;
     const ws = new WebSocket('ws://localhost:8080/ws');
     ws.onopen = () => console.log(`WebSocket connection established for folder context: ${folderId}`);
     ws.onmessage = (event) => {
       console.log('WebSocket message received on FolderPage:', event.data);
-      fetchFiles();
+      // Invalidate queries to refetch data
+      queryClient.invalidateQueries({ queryKey: ['files', folderId] });
+      queryClient.invalidateQueries({ queryKey: ['folderName', folderId] });
     };
     ws.onerror = (error) => console.error('WebSocket error on FolderPage:', error);
     ws.onclose = (event) => console.log(`WebSocket connection closed on FolderPage: Code=${event.code}, Reason='${event.reason}'`);
@@ -149,7 +142,7 @@ function FolderPage() {
         ws.close(1000, "Component unmounting from FolderPage");
       }
     };
-  }, [folderId]);
+  }, [folderId, queryClient]); // Add queryClient to dependencies
 
   const renderMediaPreview = (file: DriveFile, isSelectedVideoPlayer = false) => {
     const commonLinkProps = { target: "_blank", rel: "noopener noreferrer" };
@@ -172,7 +165,7 @@ function FolderPage() {
       );
     } else { // Logic for grid items
       if (file.mimeType.startsWith('image/')) {
-        return <img src={file.webContentLink || file.thumbnailLink} alt={file.name} className="media-preview" onError={(e) => (e.currentTarget.src = file.thumbnailLink || '')} onClick={() => handleFileClick(file)} />;
+        return <img src={file.webContentLink || file.thumbnailLink} alt={file.name} className="media-preview" loading="lazy" onError={(e) => (e.currentTarget.src = file.thumbnailLink || '')} onClick={() => handleFileClick(file)} />;
       } else if (file.mimeType.startsWith('video/') || file.mimeType.startsWith('audio/')) {
         const embedUrl = `${embedBaseUrl}${file.id}/preview`;
         return (
@@ -200,34 +193,38 @@ function FolderPage() {
     }
   };
 
-  if (loading) {
-    return <div className="page-container">Loading files for folder: {folderId}...</div>;
+  if (isLoadingFiles || isLoadingFolderName) {
+    return <div className="page-container">Loading files for folder: {folderName || folderId}...</div>;
   }
 
-  if (error) {
-    return <div className="page-container">Error fetching files for folder {folderId}: {error}</div>;
+  if (filesError) {
+    return <div className="page-container">Error fetching files for folder {folderId}: {filesError.message}</div>;
+  }
+
+  if (folderNameError) {
+    return <div className="page-container">Error fetching folder name for folder {folderId}: {folderNameError.message}</div>;
   }
 
   return (
     <div className="page-container">
-      <h1>Files in: {folderId}</h1>
+      <h1>Files in: {folderName || folderId}</h1> {/* Use folderName if available, otherwise folderId */}
       <p className="breadcrumb-link"><Link to="/">↩ Back to Folders</Link></p>
 
       {selectedVideoId && (
         <div className="selected-video-container">
           <button onClick={closeSelectedVideo} className="close-selected-video-button">×</button>
           {(() => {
-            const selectedFile = files.find(f => f.id === selectedVideoId);
+            const selectedFile = (files || []).find(f => f.id === selectedVideoId);
             return selectedFile ? renderMediaPreview(selectedFile, true) : null;
           })()}
         </div>
       )}
 
-      {files.length === 0 ? (
+      {(files || []).length === 0 ? (
         <p>No files found in this folder.</p>
       ) : (
         <div className="file-grid">
-          {files.map((file) => (
+          {(files || []).map((file) => (
             <div key={file.id} className="file-grid-item">
               {renderMediaPreview(file, false)} {/* Pass false for isSelectedVideoPlayer here */}
               <p className="file-name-grid" title={file.name}>

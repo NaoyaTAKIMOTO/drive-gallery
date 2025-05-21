@@ -2,14 +2,14 @@ package backend
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io/ioutil" // ioutil is deprecated in Go 1.16+, consider os.ReadFile
 	"log"
-	"net/http"
-	"os"
+	// "os" // No longer used directly in this file after refactoring
 
-	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/option"
 )
 
 const (
@@ -18,65 +18,39 @@ const (
 	RootFolderID = "1tRIbJKrGAsF2nhqekakN6c4lE40tj7hw"
 )
 
-// getClient uses a Context and Config to retrieve a Token
-// then returns a Drive client.
-func GetClient(config *oauth2.Config) *http.Client {
-	// The file token.json stores the user's access and refresh tokens, and is
-	// created automatically when the authorization flow completes for the first
-	// time.
-	tokFile := "token.json" // TODO: Securely manage token storage
-	tok, err := tokenFromFile(tokFile)
+// DriveService holds the initialized Google Drive service client.
+var DriveService *drive.Service
+
+// InitDriveService initializes the Google Drive service using a service account key file.
+func InitDriveService(credentialsFile string) error {
+	ctx := context.Background()
+	data, err := ioutil.ReadFile(credentialsFile) // In Go 1.16+ use os.ReadFile
 	if err != nil {
-		tok = getTokenFromWeb(config)
-		saveToken(tokFile, tok)
+		return fmt.Errorf("unable to read client secret file %s: %v", credentialsFile, err)
 	}
-	return config.Client(context.Background(), tok)
+
+	// Scopes are important. Ensure they match what the service account is authorized for
+	// and what your application needs.
+	// Example scopes:
+	// drive.DriveReadonlyScope for read-only access
+	// drive.DriveScope for full access
+	// drive.DriveFileScope for per-file access (might be more complex with service accounts)
+	// For listing files, DriveReadonlyScope is usually sufficient.
+	creds, err := google.CredentialsFromJSON(ctx, data, drive.DriveReadonlyScope)
+	if err != nil {
+		return fmt.Errorf("unable to load credentials from JSON %s: %v", credentialsFile, err)
+	}
+
+	DriveService, err = drive.NewService(ctx, option.WithCredentials(creds))
+	if err != nil {
+		return fmt.Errorf("unable to retrieve Drive client: %v", err)
+	}
+
+	log.Println("Google Drive API service initialized successfully using service account.")
+	return nil
 }
 
-// getTokenFromWeb uses Config to OAuth2 authorize and get a Token.
-// It opens a browser window to the authorization page.
-func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to the following link in your browser then type the "+
-		"authorization code: \n%v\n", authURL)
-
-	var authCode string
-	if _, err := fmt.Scan(&authCode); err != nil {
-		log.Fatalf("Unable to read authorization code: %v", err)
-	}
-
-	tok, err := config.Exchange(context.TODO(), authCode)
-	if err != nil {
-		log.Fatalf("Unable to retrieve token from web: %v", err)
-	}
-	return tok
-}
-
-// tokenFromFile retrieves a Token from a given file path.
-// It returns the retrieved Token and any read error encountered.
-func tokenFromFile(file string) (*oauth2.Token, error) {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	tok := &oauth2.Token{}
-	err = json.NewDecoder(f).Decode(tok)
-	return tok, err
-}
-
-// saveToken saves a Token to a file path.
-func saveToken(path string, token *oauth2.Token) {
-	fmt.Printf("Saving credential file to: %s\n", path)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		log.Fatalf("Unable to cache oauth token: %v", err)
-	}
-	defer f.Close()
-	json.NewEncoder(f).Encode(token)
-}
-
-// listFilesInFolder lists files in a specific Google Drive folder.
+// ListFilesInFolder lists files in a specific Google Drive folder.
 func ListFilesInFolder(srv *drive.Service, folderID string) ([]*drive.File, error) {
 	// TODO: Implement pagination if needed
 	r, err := srv.Files.List().
@@ -89,6 +63,15 @@ func ListFilesInFolder(srv *drive.Service, folderID string) ([]*drive.File, erro
 	}
 
 	return r.Files, nil
+}
+
+// GetFolderName retrieves the name of a specific folder by its ID.
+func GetFolderName(srv *drive.Service, folderID string) (string, error) {
+	file, err := srv.Files.Get(folderID).Fields("name").Do()
+	if err != nil {
+		return "", fmt.Errorf("unable to retrieve folder name for ID %s: %v", folderID, err)
+	}
+	return file.Name, nil
 }
 
 // ListFoldersInRootFolder lists folders directly under the predefined RootFolderID.

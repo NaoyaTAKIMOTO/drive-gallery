@@ -1,44 +1,35 @@
 package main
 
 import (
-	"context"
+	// "context" // No longer directly used in main.go
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	// "io/ioutil" // No longer needed here directly for credentials.json
 	"log"
 	"net/http"
 	"strings" // Added for path parsing
 
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/drive/v3"
-	"google.golang.org/api/option"
+	// "golang.org/x/oauth2/google" // No longer needed here
+	// "google.golang.org/api/drive/v3" // No longer needed here
+	// "google.golang.org/api/option" // No longer needed here
 
 	"drive-gallery/backend" // Import the local backend package
 )
 
-var driveService *drive.Service // Global variable for Drive service
+// var driveService *drive.Service // Global variable for Drive service - will use backend.DriveService
 
 func main() {
-	b, err := ioutil.ReadFile("backend/credentials.json")
+	// Initialize Google Drive Service using Service Account
+	// The key file is in the root directory.
+	err := backend.InitDriveService("drivegallery-460509-e833751c168d.json")
 	if err != nil {
-		log.Fatalf("Unable to read client secret file: %v", err)
+		log.Fatalf("Unable to initialize Drive service: %v", err)
 	}
-
-	config, err := google.ConfigFromJSON(b, drive.DriveReadonlyScope)
-	if err != nil {
-		log.Fatalf("Unable to parse client secret file to config: %v", err)
-	}
-	client := backend.GetClient(config)
-
-	srv, err := drive.NewService(context.Background(), option.WithHTTPClient(client))
-	if err != nil {
-		log.Fatalf("Unable to retrieve Drive client: %v", err)
-	}
-	driveService = srv // Assign to global variable
 
 	// Set up HTTP routes
 	http.HandleFunc("/api/folders", foldersHandler)
-	http.HandleFunc("/api/files/", filesHandler) // Note the trailing slash for path prefix matching
+	http.HandleFunc("/api/files/", filesHandler)       // Note the trailing slash for path prefix matching
+	http.HandleFunc("/api/folder-name/", folderNameHandler) // New handler for folder names
 	http.HandleFunc("/webhook", webhookHandler)
 	http.HandleFunc("/ws", wsHandler)
 
@@ -72,7 +63,7 @@ func foldersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	folders, err := backend.ListFoldersInRootFolder(driveService)
+	folders, err := backend.ListFoldersInRootFolder(backend.DriveService) // Use backend.DriveService
 	if err != nil {
 		log.Printf("Error listing root folders: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -110,7 +101,7 @@ func filesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	folderID := folderIDComponent
 
-	files, err := backend.ListFilesInFolder(driveService, folderID)
+	files, err := backend.ListFilesInFolder(backend.DriveService, folderID) // Use backend.DriveService
 	if err != nil {
 		log.Printf("Error listing files for folder %s: %v", folderID, err)
 		w.Header().Set("Content-Type", "application/json")
@@ -141,4 +132,37 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	// you might need more complex logic or ensure CheckOrigin allows OPTIONS.
 	// For simplicity, assuming ServeWs and its upgrader manage this.
 	backend.ServeWs(w, r)
+}
+
+func folderNameHandler(w http.ResponseWriter, r *http.Request) {
+	setCorsHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	folderIDComponent := strings.TrimPrefix(r.URL.Path, "/api/folder-name/")
+	if folderIDComponent == "" || strings.Contains(folderIDComponent, "/") {
+		http.Error(w, "Folder ID is missing or invalid in path", http.StatusBadRequest)
+		return
+	}
+	folderID := folderIDComponent
+
+	folderName, err := backend.GetFolderName(backend.DriveService, folderID)
+	if err != nil {
+		log.Printf("Error retrieving folder name for ID %s: %v", folderID, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unable to retrieve folder name: %v", err)})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"name": folderName})
 }
