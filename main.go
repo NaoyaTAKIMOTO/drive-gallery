@@ -7,11 +7,8 @@ import (
 	// "io/ioutil" // No longer needed here directly for credentials.json
 	"log"
 	"net/http"
+	"strconv" // Added for parsing pageSize
 	"strings" // Added for path parsing
-
-	// "golang.org/x/oauth2/google" // No longer needed here
-	// "google.golang.org/api/drive/v3" // No longer needed here
-	// "google.golang.org/api/option" // No longer needed here
 
 	"drive-gallery/backend" // Import the local backend package
 )
@@ -101,7 +98,23 @@ func filesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	folderID := folderIDComponent
 
-	files, err := backend.ListFilesInFolder(backend.DriveService, folderID) // Use backend.DriveService
+	// Parse query parameters for pagination
+	pageSizeStr := r.URL.Query().Get("pageSize")
+	pageToken := r.URL.Query().Get("pageToken")
+
+	var pageSize int64 = 100 // Default page size
+	if pageSizeStr != "" {
+		parsedSize, err := strconv.ParseInt(pageSizeStr, 10, 64)
+		if err == nil && parsedSize > 0 {
+			pageSize = parsedSize
+		} else {
+			log.Printf("Invalid pageSize parameter: %s, using default %d", pageSizeStr, pageSize)
+		}
+	}
+
+	filterType := r.URL.Query().Get("filter") // Get filter parameter
+
+	files, nextPageToken, err := backend.ListFilesInFolder(backend.DriveService, folderID, pageSize, pageToken, filterType)
 	if err != nil {
 		log.Printf("Error listing files for folder %s: %v", folderID, err)
 		w.Header().Set("Content-Type", "application/json")
@@ -110,9 +123,17 @@ func filesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log MIME types for debugging
+	for _, file := range files {
+		log.Printf("Backend: File Name: %s, MIME Type: %s", file.Name, file.MimeType)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{"data": files})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":          files,
+		"nextPageToken": nextPageToken,
+	})
 }
 
 func webhookHandler(w http.ResponseWriter, r *http.Request) {

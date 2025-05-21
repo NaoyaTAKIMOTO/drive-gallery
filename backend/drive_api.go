@@ -50,19 +50,37 @@ func InitDriveService(credentialsFile string) error {
 	return nil
 }
 
-// ListFilesInFolder lists files in a specific Google Drive folder.
-func ListFilesInFolder(srv *drive.Service, folderID string) ([]*drive.File, error) {
-	// TODO: Implement pagination if needed
-	r, err := srv.Files.List().
-		Q(fmt.Sprintf("'%s' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'", folderID)). // Exclude folders
-		PageSize(100). // Adjust page size as needed, increased for more files
-		Fields("nextPageToken, files(id, name, mimeType, webViewLink, thumbnailLink, webContentLink)"). // Added webContentLink
-		Do()
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve files: %v", err)
+// ListFilesInFolder lists files in a specific Google Drive folder with pagination and optional filtering.
+// It returns a slice of files, the next page token, and an error.
+func ListFilesInFolder(srv *drive.Service, folderID string, pageSize int64, pageToken string, filterType string) ([]*drive.File, string, error) {
+	query := fmt.Sprintf("'%s' in parents and trashed = false", folderID)
+
+	// Add MIME type filter based on filterType
+	switch filterType {
+	case "image":
+		query += " and mimeType contains 'image/'"
+	case "video":
+		query += " and (mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.video')"
+	default:
+		// For "all" or unknown filter types, exclude folders
+		query += " and mimeType != 'application/vnd.google-apps.folder'"
 	}
 
-	return r.Files, nil
+	call := srv.Files.List().
+		Q(query).
+		PageSize(pageSize).
+		Fields("nextPageToken, files(id, name, mimeType, webViewLink, thumbnailLink, webContentLink)")
+
+	if pageToken != "" {
+		call = call.PageToken(pageToken)
+	}
+
+	r, err := call.Do()
+	if err != nil {
+		return nil, "", fmt.Errorf("unable to retrieve files: %v", err)
+	}
+
+	return r.Files, r.NextPageToken, nil
 }
 
 // GetFolderName retrieves the name of a specific folder by its ID.

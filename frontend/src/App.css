@@ -163,6 +163,13 @@ audio.media-preview {
   margin: 0; /* Reset margin */
 }
 
+/* File Type Icon */
+.file-type-icon {
+  margin-left: 5px;
+  font-size: 0.8em;
+  vertical-align: middle;
+}
+
 /* Breadcrumb Link */
 .breadcrumb-link {
   margin-bottom: 1rem;
@@ -174,6 +181,34 @@ audio.media-preview {
 }
 .breadcrumb-link a:hover {
   color: #007bff;
+}
+
+/* Filter Buttons */
+.filter-buttons {
+  margin-bottom: 1.5rem;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.filter-buttons button {
+  padding: 8px 15px;
+  border: 1px solid #007bff;
+  border-radius: 5px;
+  background-color: #fff;
+  color: #007bff;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.filter-buttons button:hover {
+  background-color: #e7f3ff;
+}
+
+.filter-buttons button.active {
+  background-color: #007bff;
+  color: #fff;
 }
 
 /* Loading and Error States (basic styling) */

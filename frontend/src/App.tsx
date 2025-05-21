@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query'; // useQueryClientもここでインポート
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import './App.css';
 
 // Define the structure of a file object based on backend response
@@ -10,7 +10,13 @@ interface DriveFile {
   mimeType: string;
   webViewLink?: string;
   thumbnailLink?: string;
-  webContentLink?: string; // Added for direct media access
+  webContentLink?: string;
+}
+
+// Define the structure for the paginated response from backend
+interface PaginatedFilesResponse {
+  data: DriveFile[];
+  nextPageToken: string;
 }
 
 // Define the structure for a folder object
@@ -76,11 +82,24 @@ function HomePage() {
 function FolderPage() {
   const { folderId } = useParams<{ folderId: string }>();
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-  const queryClient = useQueryClient(); // Initialize useQueryClient
+  const [filter, setFilter] = useState<'all' | 'image' | 'video'>('all');
+  const queryClient = useQueryClient();
+
+  // Pagination states
+  const [currentPageToken, setCurrentPageToken] = useState<string>('');
+  const [previousPageTokens, setPreviousPageTokens] = useState<string[]>(['']); // Keep track of tokens for "previous" button
+  const pageSize = 20; // Define page size
+
+  // Helper function to determine file type
+  const getFileType = (mimeType: string) => {
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.startsWith('video/')) return 'video';
+    return 'other';
+  };
 
   const handleFileClick = (file: DriveFile) => {
     console.log('handleFileClick triggered for file:', file.name, 'ID:', file.id, 'MIME Type:', file.mimeType);
-    if (file.mimeType.startsWith('video/')) {
+    if (getFileType(file.mimeType) === 'video') {
       setSelectedVideoId(file.id);
       console.log('setSelectedVideoId called with ID:', file.id);
     } else if (file.webViewLink) {
@@ -92,23 +111,7 @@ function FolderPage() {
     setSelectedVideoId(null);
   };
 
-  // Fetch files using React Query
-  const { data: files, isLoading: isLoadingFiles, error: filesError } = useQuery<DriveFile[], Error>({
-    queryKey: ['files', folderId],
-    queryFn: async () => {
-      if (!folderId) throw new Error('Folder ID is missing');
-      const response = await fetch(`http://localhost:8080/api/files/${folderId}`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-      }
-      const result = await response.json();
-      return result.data || [];
-    },
-    enabled: !!folderId, // Only run query if folderId exists
-  });
-
-  // Fetch folder name using React Query
+  // Fetch folder name using React Query (Moved here for better scope visibility)
   const { data: folderName, isLoading: isLoadingFolderName, error: folderNameError } = useQuery<string, Error>({
     queryKey: ['folderName', folderId],
     queryFn: async () => {
@@ -124,7 +127,51 @@ function FolderPage() {
     enabled: !!folderId,
   });
 
-  // WebSocket for real-time updates
+  // Fetch files using React Query
+  const { data, isLoading: isLoadingFiles, error: filesError } = useQuery<PaginatedFilesResponse, Error>({
+    queryKey: ['files', folderId, currentPageToken, pageSize, filter], // Add filter to queryKey
+    queryFn: async () => {
+      if (!folderId) throw new Error('Folder ID is missing');
+      let url = `http://localhost:8080/api/files/${folderId}?pageSize=${pageSize}&pageToken=${currentPageToken}`;
+      if (filter !== 'all') {
+        url += `&filter=${filter}`; // Add filter parameter if not 'all'
+      }
+      const response = await fetch(url);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const result = await response.json();
+      return result; // Expecting { data: [], nextPageToken: "" }
+    },
+    enabled: !!folderId,
+    // staleTime: Infinity, // Removed to ensure data refetches on pageToken change
+  });
+
+  // Extract files and nextPageToken from the data
+  const files = data?.data || [];
+  const nextPageToken = data?.nextPageToken || '';
+
+  const handleNextPage = () => {
+    if (nextPageToken) {
+      setPreviousPageTokens(prev => [...prev, currentPageToken]); // 古いページトークンを履歴に追加
+      setCurrentPageToken(nextPageToken); // 現在のページトークンを更新
+    }
+  };
+
+  const handlePreviousPage = () => {
+    if (previousPageTokens.length > 0) { // 履歴がある場合
+      const newPreviousTokens = [...previousPageTokens];
+      const prevToken = newPreviousTokens.pop(); // 履歴から最後のトークン（現在のページの前のトークン）を取得
+      setCurrentPageToken(prevToken || ''); // そのトークンを現在のページトークンに設定（空の場合は最初のページ）
+      setPreviousPageTokens(newPreviousTokens); // 履歴を更新
+    }
+  };
+
+  const hasNextPage = !!nextPageToken; // Check if there's a next page
+  const hasPreviousPage = previousPageTokens.length > 1 || (previousPageTokens.length === 1 && currentPageToken !== ''); // Check if there's a previous page
+
+  // WebSocket for real-time updates (Moved here, after data fetching hooks)
   useEffect(() => {
     if (!folderId) return;
     const ws = new WebSocket('ws://localhost:8080/ws');
@@ -147,6 +194,7 @@ function FolderPage() {
   const renderMediaPreview = (file: DriveFile, isSelectedVideoPlayer = false) => {
     const commonLinkProps = { target: "_blank", rel: "noopener noreferrer" };
     const embedBaseUrl = "https://drive.google.com/file/d/";
+    console.log(`renderMediaPreview: file.name=${file.name}, file.mimeType=${file.mimeType}, isSelectedVideoPlayer=${isSelectedVideoPlayer}`); // Debug log
 
     if (isSelectedVideoPlayer) { // Logic for the large selected video player
       if (!file.mimeType.startsWith('video/') && !file.mimeType.startsWith('audio/')) {
@@ -205,10 +253,22 @@ function FolderPage() {
     return <div className="page-container">Error fetching folder name for folder {folderId}: {folderNameError.message}</div>;
   }
 
+  // Filtered files based on the current filter state (now handled by backend)
+  // This client-side filtering is no longer strictly necessary if backend filters,
+  // but keeping it for robustness or if backend filter is not exhaustive.
+  // However, for now, we assume backend handles filtering.
+  const filteredFiles = files; // No client-side filtering needed if backend filters
+
   return (
     <div className="page-container">
       <h1>Files in: {folderName || folderId}</h1> {/* Use folderName if available, otherwise folderId */}
       <p className="breadcrumb-link"><Link to="/">↩ Back to Folders</Link></p>
+
+      <div className="filter-buttons">
+        <button onClick={() => setFilter('all')} className={filter === 'all' ? 'active' : ''}>すべて</button>
+        <button onClick={() => setFilter('image')} className={filter === 'image' ? 'active' : ''}>写真 📷</button>
+        <button onClick={() => setFilter('video')} className={filter === 'video' ? 'active' : ''}>動画 🎥</button>
+      </div>
 
       {selectedVideoId && (
         <div className="selected-video-container">
@@ -220,20 +280,28 @@ function FolderPage() {
         </div>
       )}
 
-      {(files || []).length === 0 ? (
-        <p>No files found in this folder.</p>
+      {filteredFiles.length === 0 ? (
+        <p>このフォルダーにはファイルが見つかりませんでした。</p>
       ) : (
         <div className="file-grid">
-          {(files || []).map((file) => (
+          {filteredFiles.map((file) => (
             <div key={file.id} className="file-grid-item">
-              {renderMediaPreview(file, false)} {/* Pass false for isSelectedVideoPlayer here */}
+              {renderMediaPreview(file, false)}
               <p className="file-name-grid" title={file.name}>
                 {file.name}
+                {getFileType(file.mimeType) === 'image' && <span className="file-type-icon"> 📷</span>}
+                {getFileType(file.mimeType) === 'video' && <span className="file-type-icon"> 🎥</span>}
               </p>
             </div>
           ))}
         </div>
       )}
+
+      {/* Pagination Controls */}
+      <div className="pagination-controls">
+        <button onClick={handlePreviousPage} disabled={!hasPreviousPage}>前へ</button>
+        <button onClick={handleNextPage} disabled={!hasNextPage}>次へ</button>
+      </div>
     </div>
   );
 }
