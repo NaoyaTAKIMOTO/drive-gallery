@@ -29,3 +29,11 @@ backend/token.json
 # 環境変数ファイル (もしあれば)
 # .env
 drivegallery-460509-e833751c168d.json
+node_modules/
+.env
+drivegallery-460509-940d67da0b0e.json
+backend/drive_api.go
+.firebaserc
+drive-gallery.db
+.firebase/hosting.ZGlzdA.cache
+.firebase/hosting.ZnJvbnRlbmQvZGlzdA.cache

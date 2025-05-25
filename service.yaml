@@ -1,0 +1,29 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: drive-gallery-backend
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0" # Optional: Scale to zero instances when idle
+        # run.googleapis.com/cloudsql-instances: drivegallery-460509:asia-northeast1:drive-gallery-db # Removed for Firestore
+    spec:
+      timeoutSeconds: 600 # Extend timeout to 10 minutes
+      containers:
+      - image: gcr.io/drivegallery-460509/drive-gallery-backend # Ensure this image is rebuilt with Firestore changes
+        ports:
+        - containerPort: 8080
+        env:
+        # - name: DATABASE_URL # Removed for Firestore
+        #   value: "host=/cloudsql/drivegallery-460509:asia-northeast1:drive-gallery-db port=5432 user=app_user dbname=drive_gallery_db"
+        # - name: DB_PASSWORD # Removed for Firestore
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: db-password
+        #       key: latest
+        - name: GCP_PROJECT
+          value: "drivegallery-460509" # Set the Firebase Project ID explicitly for Cloud Run
+        # - name: GOOGLE_APPLICATION_CREDENTIALS # Only needed if not using service account identity
+        #   value: "/path/to/serviceAccountKey.json" # Or from Secret Manager
+      serviceAccountName: 685534023335-compute@developer.gserviceaccount.com # Ensure this SA has Firestore permissions

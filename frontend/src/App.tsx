@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'; // Added useMutation
+import ReactMarkdown from 'react-markdown'; // Will be installed
 import './App.css';
 
 // Define the structure of a file object based on backend response
@@ -34,7 +35,7 @@ function HomePage() {
     queryKey: ['folders'],
     queryFn: async () => {
       console.log('Fetching folders...');
-      const response = await fetch('http://localhost:8080/api/folders');
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/folders`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
@@ -56,6 +57,9 @@ function HomePage() {
   return (
     <div className="page-container">
       <h1>Luke Avenue</h1>
+      <p className="profile-link-container">
+        <button onClick={() => navigate('/profiles')} className="profile-link-button">メンバープロフィールを見る</button>
+      </p>
       {(folders || []).length === 0 ? (
         <p>No folders found in the root directory.</p>
       ) : (
@@ -116,7 +120,7 @@ function FolderPage() {
     queryKey: ['folderName', folderId],
     queryFn: async () => {
       if (!folderId) throw new Error('Folder ID is missing');
-      const response = await fetch(`http://localhost:8080/api/folder-name/${folderId}`);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/folder-name/${folderId}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
@@ -132,7 +136,7 @@ function FolderPage() {
     queryKey: ['files', folderId, currentPageToken, pageSize, filter], // Add filter to queryKey
     queryFn: async () => {
       if (!folderId) throw new Error('Folder ID is missing');
-      let url = `http://localhost:8080/api/files/${folderId}?pageSize=${pageSize}&pageToken=${currentPageToken}`;
+      let url = `${import.meta.env.VITE_API_BASE_URL}/api/files/${folderId}?pageSize=${pageSize}&pageToken=${currentPageToken}`;
       if (filter !== 'all') {
         url += `&filter=${filter}`; // Add filter parameter if not 'all'
       }
@@ -174,7 +178,7 @@ function FolderPage() {
   // WebSocket for real-time updates (Moved here, after data fetching hooks)
   useEffect(() => {
     if (!folderId) return;
-    const ws = new WebSocket('ws://localhost:8080/ws');
+    const ws = new WebSocket(`${import.meta.env.VITE_API_BASE_URL.replace('http', 'ws')}/ws`);
     ws.onopen = () => console.log(`WebSocket connection established for folder context: ${folderId}`);
     ws.onmessage = (event) => {
       console.log('WebSocket message received on FolderPage:', event.data);
@@ -306,6 +310,256 @@ function FolderPage() {
   );
 }
 
+// Define the structure of a Profile object
+interface Profile {
+  id?: string; // Changed from number to string, as Firestore IDs are strings
+  name: string;
+  bio: string;
+  icon_url: string;
+}
+
+// --- ProfileList Component ---
+function ProfileList() {
+  const { data: profiles, isLoading, error } = useQuery<Profile[], Error>({
+    queryKey: ['profiles'],
+    queryFn: async () => {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/profiles`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const result = await response.json();
+      return result.data || [];
+    },
+  });
+
+  if (isLoading) {
+    return <div className="page-container">Loading profiles...</div>;
+  }
+
+  if (error) {
+    return <div className="page-container">Error fetching profiles: {error.message}</div>;
+  }
+
+  return (
+    <div className="page-container">
+      <h1>メンバープロフィール</h1>
+      <p className="breadcrumb-link"><Link to="/">↩ トップページに戻る</Link></p>
+      <Link to="/profiles/new/edit" className="add-profile-link">新しいプロフィールを追加</Link>
+      {(profiles || []).length === 0 ? (
+        <p>プロフィールが見つかりませんでした。</p>
+      ) : (
+        <div className="profile-grid">
+          {(profiles || []).map((profile) => (
+            <div key={profile.id} className="profile-card">
+              <img src={profile.icon_url || '/vite.svg'} alt={profile.name} className="profile-icon" />
+              <h2>{profile.name}</h2>
+              <div className="profile-bio">
+                <ReactMarkdown>{profile.bio}</ReactMarkdown>
+              </div>
+              <Link to={`/profiles/${profile.id}/edit`} className="edit-profile-link">編集</Link>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- ProfileEditForm Component ---
+function ProfileEditForm() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const isNew = id === 'new';
+  const profileId = isNew ? null : id; // Use id directly as string
+
+  console.log('ProfileEditForm: id param =', id);
+  console.log('ProfileEditForm: isNew =', isNew);
+  console.log('ProfileEditForm: profileId (string) =', profileId);
+
+  const [name, setName] = useState('');
+  const [bio, setBio] = useState('');
+  const [iconFile, setIconFile] = useState<File | null>(null);
+  const [iconPreviewUrl, setIconPreviewUrl] = useState<string | null>(null);
+
+  // Fetch existing profile data if editing
+  const { data: existingProfile, isLoading: isLoadingProfile, error: profileError } = useQuery<Profile, Error>({
+    queryKey: ['profile', profileId],
+    queryFn: async () => {
+      if (!profileId) throw new Error('Profile ID is missing');
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/profiles/${profileId}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    },
+    enabled: !isNew && !!profileId, // Only fetch if not new and ID is valid
+  });
+
+  useEffect(() => {
+    if (existingProfile) {
+      console.log('ProfileEditForm: existingProfile data received:', existingProfile);
+      setName(existingProfile.name);
+      setBio(existingProfile.bio);
+      setIconPreviewUrl(existingProfile.icon_url);
+    } else {
+      console.log('ProfileEditForm: existingProfile is null or undefined.');
+    }
+  }, [existingProfile]);
+
+  const createProfileMutation = useMutation({
+    mutationFn: async (newProfile: Profile) => {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProfile),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      navigate('/profiles');
+    },
+  });
+
+  const updateProfileMutation = useMutation({
+    mutationFn: async (updatedProfile: Profile) => {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/profiles/${updatedProfile.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedProfile),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      queryClient.invalidateQueries({ queryKey: ['profile', profileId] });
+      navigate('/profiles');
+    },
+  });
+
+  const uploadIconMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('icon', file);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/upload/icon`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      const result = await response.json();
+      return result.icon_url;
+    },
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    let finalIconUrl = iconPreviewUrl || '';
+
+    if (iconFile) {
+      try {
+        finalIconUrl = await uploadIconMutation.mutateAsync(iconFile);
+      } catch (uploadError) {
+        alert(`アイコンのアップロードに失敗しました: ${uploadError}`);
+        return;
+      }
+    }
+
+    const profileData: Profile = { name, bio, icon_url: finalIconUrl };
+
+    try {
+      if (isNew) {
+        await createProfileMutation.mutateAsync(profileData);
+      } else if (profileId) {
+        await updateProfileMutation.mutateAsync({ ...profileData, id: profileId });
+      }
+      alert('プロフィールを保存しました！');
+    } catch (saveError) {
+      alert(`プロフィールの保存に失敗しました: ${saveError}`);
+    }
+  };
+
+  const handleIconChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setIconFile(file);
+      setIconPreviewUrl(URL.createObjectURL(file)); // Create a local URL for preview
+    } else {
+      setIconFile(null);
+      setIconPreviewUrl(null);
+    }
+  };
+
+  if (!isNew && isLoadingProfile) {
+    return <div className="page-container">Loading profile for editing...</div>;
+  }
+
+  if (!isNew && profileError) {
+    return <div className="page-container">Error fetching profile: {profileError.message}</div>;
+  }
+
+  return (
+    <div className="page-container">
+      <h1>{isNew ? '新しいプロフィールを作成' : `${name}のプロフィールを編集`}</h1>
+      <p className="breadcrumb-link"><Link to="/profiles">↩ プロフィール一覧に戻る</Link></p>
+
+      <form onSubmit={handleSubmit} className="profile-edit-form">
+        <div className="form-group">
+          <label htmlFor="name">名前:</label>
+          <input
+            type="text"
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="bio">紹介文 (Markdown):</label>
+          <textarea
+            id="bio"
+            value={bio}
+            onChange={(e) => setBio(e.target.value)}
+            rows={10}
+          ></textarea>
+        </div>
+        <div className="form-group">
+          <label htmlFor="icon">アイコン画像:</label>
+          <input
+            type="file"
+            id="icon"
+            accept="image/*"
+            onChange={handleIconChange}
+          />
+          {iconPreviewUrl && (
+            <div className="icon-preview">
+              <img src={iconPreviewUrl} alt="Icon Preview" />
+            </div>
+          )}
+        </div>
+        <button type="submit" disabled={createProfileMutation.isPending || updateProfileMutation.isPending || uploadIconMutation.isPending}>
+          {createProfileMutation.isPending || updateProfileMutation.isPending || uploadIconMutation.isPending ? '保存中...' : '保存'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 // --- Main App Component (Router Setup) ---
 function App() {
   return (
@@ -315,6 +569,8 @@ function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/folder/:folderId" element={<FolderPage />} />
+          <Route path="/profiles" element={<ProfileList />} />
+          <Route path="/profiles/:id/edit" element={<ProfileEditForm />} />
         </Routes>
       </main>
       {/* A global footer could go here */}
