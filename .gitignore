@@ -65,8 +65,8 @@ yarn-error.log*
 .firebaserc
 
 # CLI tools
-cli_metadata_updater/updater
-cli_uploader/uploader
+tools/metadata-updater/updater
+tools/uploader/uploader
 
 # Large media directories (should use Git LFS or external storage)
 LukeAvenue/

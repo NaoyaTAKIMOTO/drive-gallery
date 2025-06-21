@@ -96,6 +96,9 @@ function FolderPage() {
   // Pagination states
   const [currentPageToken, setCurrentPageToken] = useState<string>('');
   const [previousPageTokens, setPreviousPageTokens] = useState<string[]>(['']);
+  const [currentPageNumber, setCurrentPageNumber] = useState<number>(1);
+  const [pageTokenMap, setPageTokenMap] = useState<Map<number, string>>(new Map([[1, '']]));
+  const [totalPages, setTotalPages] = useState<number>(1);
   const pageSize = 20;
 
   // Helper function to determine file type
@@ -169,8 +172,18 @@ function FolderPage() {
 
   const handleNextPage = () => {
     if (nextPageToken) {
+      const nextPageNum = currentPageNumber + 1;
       setPreviousPageTokens((prev: string[]) => [...prev, currentPageToken]);
       setCurrentPageToken(nextPageToken);
+      setCurrentPageNumber(nextPageNum);
+      
+      // Update page token map
+      setPageTokenMap(prev => new Map(prev).set(nextPageNum, nextPageToken));
+      
+      // Update total pages if we go beyond current known pages
+      if (nextPageNum > totalPages) {
+        setTotalPages(nextPageNum);
+      }
     }
   };
 
@@ -180,6 +193,39 @@ function FolderPage() {
       const prevToken = newPreviousTokens.pop();
       setCurrentPageToken(prevToken || '');
       setPreviousPageTokens(newPreviousTokens);
+      setCurrentPageNumber(currentPageNumber - 1);
+    }
+  };
+
+  const handlePageClick = (pageNumber: number) => {
+    if (pageNumber === currentPageNumber) return;
+    
+    const token = pageTokenMap.get(pageNumber);
+    if (token !== undefined) {
+      // We have the token for this page, navigate directly
+      setCurrentPageToken(token);
+      setCurrentPageNumber(pageNumber);
+      
+      // Rebuild previousPageTokens based on the target page
+      const newPreviousTokens: string[] = [''];
+      for (let i = 2; i <= pageNumber; i++) {
+        const pageToken = pageTokenMap.get(i);
+        if (pageToken !== undefined) {
+          newPreviousTokens.push(pageTokenMap.get(i - 1) || '');
+        }
+      }
+      setPreviousPageTokens(newPreviousTokens);
+    } else {
+      // We don't have the token, need to navigate sequentially
+      if (pageNumber > currentPageNumber) {
+        // Navigate forward page by page
+        handleNextPage();
+        // TODO: Could implement recursive navigation for multiple pages
+      } else {
+        // Navigate backward page by page
+        handlePreviousPage();
+        // TODO: Could implement recursive navigation for multiple pages
+      }
     }
   };
 

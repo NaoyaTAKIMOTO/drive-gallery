@@ -17,7 +17,7 @@ backend-deploy:
 
 firebase-deploy:
 	@echo "--- Deploying to Firebase Hosting ---"
-	firebase deploy --only hosting
+	firebase deploy --only hosting --config config/firebase.json
 
 deploy: frontend-build backend-deploy firebase-deploy
 	@echo "--- All deployments completed ---"
@@ -29,7 +29,7 @@ clean:
 set-cors:
 	@echo "--- Setting CORS policy for Firebase Storage bucket ---"
 	@echo "Ensure FIREBASE_STORAGE_BUCKET environment variable is set (e.g., in .env file)."
-	gsutil cors set cors.json gs://$(shell grep FIREBASE_STORAGE_BUCKET .env | cut -d '=' -f2)
+	gsutil cors set config/cors.json gs://$(shell grep FIREBASE_STORAGE_BUCKET .env | cut -d '=' -f2)
 
 run-local-backend:
 	@echo "--- Starting local backend server ---"

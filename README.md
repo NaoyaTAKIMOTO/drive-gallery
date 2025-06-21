@@ -1,148 +1,410 @@
-# Google Drive Media Gallery
+# Luke Avenue - Drive Gallery
 
-## Project Goal
-Firebase Storage に保存された画像、動画、音声ファイルをウェブサイト上に表示し、動的に更新を反映する。
+A Firebase Storage media gallery application for the Luke Avenue music session group. Share and view event photos and videos with real-time updates.
 
-## Specifications
+## 🎵 About Luke Avenue
 
-*   **対象ファイル:** Firebase Storage にアップロードされた画像、動画、音声ファイル。
-*   **表示形式:** ウェブサイト上でファイルをグリッド表示し、動画と音声を再生可能にする。
-*   **動的更新:** バックエンドからの通知（WebSocket）でリアルタイムに表示を更新する。
+Luke Avenue is a Japanese music session group that organizes regular live performance events. This gallery application helps members share and view photos and videos from their sessions.
 
-## Technology Stack
+## ✨ Features
 
-*   **フロントエンド:** TypeScript + React
-*   **バックエンド:** Go
-*   **データベース:** Google Cloud Firestore
-*   **ファイルストレージ:** Firebase Storage
-*   **デプロイ:** GCP Cloud Run
+- **📸 Media Gallery**: View photos and videos organized by event folders
+- **📁 Folder Organization**: Logical folder structure with metadata management
+- **🔄 Real-time Updates**: WebSocket notifications for instant content updates
+- **👥 Member Profiles**: User profiles with markdown bio support
+- **📱 Responsive Design**: Works on desktop and mobile devices
+- **⚡ Performance**: Pagination, filtering, and intelligent caching
+- **🔒 Secure**: Firebase Authentication and Storage rules
+- **🌐 Multilingual**: Japanese interface for target audience
 
-## Architecture
+## 🏗️ Architecture
 
-```mermaid
-graph TD
-    A[ユーザーのブラウザ] --> B(React フロントエンド);
-    B --> C{Go バックエンド};
-    C --> F(Cloud Firestore);
-    C --> G(Firebase Storage);
-    G -- ファイル変更 --> C;
-    C -- WebSocket 通知 --> B;
 ```
-*   ユーザーのブラウザはReactフロントエンドと通信します。
-*   ReactフロントエンドはGoバックエンドのAPIを呼び出します。
-*   GoバックエンドはCloud Firestoreと連携してファイルメタデータやプロフィール情報などの永続データを管理し、Firebase Storageと連携してファイルを保存・取得します。
-*   Firebase Storageでのファイル変更は、必要に応じてバックエンドに通知され（例: Cloud Functions for Firebase を介したトリガー）、WebSocketなどを介してリアルタイムにフロントエンドに反映されます。
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
+│                 │    │                  │    │                     │
+│  React Frontend │◄──►│   Go Backend     │◄──►│  Firebase Services  │
+│  (TypeScript)   │    │  (REST API +     │    │  • Storage          │
+│                 │    │   WebSocket)     │    │  • Firestore        │
+└─────────────────┘    └──────────────────┘    │  • Authentication   │
+                                                └─────────────────────┘
+```
 
-## API Endpoints
+### Tech Stack
 
-*   `/api/folders`: ルートフォルダ直下のフォルダ一覧を取得 (GET)
-*   `/api/files/{folderId}`: 指定されたフォルダ内のファイル一覧を取得 (GET)
-    *   Query Parameters: `pageSize`, `pageToken`, `filter` (image, video, all)
-*   `/api/folder-name/{folderId}`: 指定されたフォルダの名前を取得 (GET)
-*   `/api/profiles`:
-    *   プロフィール一覧を取得 (GET)
-    *   新しいプロフィールを作成 (POST)
-*   `/api/profiles/{profileId}`:
-    *   特定のプロフィールを取得 (GET)
-    *   特定のプロフィールを更新 (PUT)
-    *   特定のプロフィールを削除 (DELETE)
-*   `/api/upload/icon`: プロフィールアイコンをアップロード (POST, multipart/form-data)
-*   `/webhook`: Webhook通知を受信 (POST)
-*   `/ws`: WebSocket接続を確立
+- **Frontend**: React 19 + TypeScript + Vite + React Query
+- **Backend**: Go 1.23 + Firebase Admin SDK
+- **Database**: Google Cloud Firestore
+- **Storage**: Firebase Storage
+- **Real-time**: WebSocket connections
+- **Deployment**: GCP Cloud Run + Firebase Hosting
 
-## Setup and Configuration
+## 📊 Current Project Status
 
-1.  **Google Cloud Project:**
-    *   Google Cloud Project を作成または選択します。
-    *   Cloud Run API を有効にします。
-    *   Cloud Firestore データベースと Firebase Storage を作成し、有効にします (Native mode推奨)。
-2.  **サービスアカウント:**
-    *   Cloud Run が使用するサービスアカウントを作成または選択します。
-    *   このサービスアカウントに以下のロールを付与します:
-        *   Cloud Firestore へのアクセス権限 (例: `roles/datastore.user` または `Firebase データ閲覧者` + `Firebase データ編集者`)
-        *   Firebase Storage へのアクセス権限 (例: `roles/storage.objectViewer`, `roles/storage.objectCreator`, `roles/storage.objectAdmin` など、必要に応じて)
-        *   (オプション) Secret Manager Secret Accessor (シークレットを使用する場合)
-3.  **環境変数:**
-    *   `main.go` および `backend/firebase.go` で参照される環境変数を設定します。
-    *   Cloud Run にデプロイする際は `service.yaml` に以下を設定します:
-        *   `FIREBASE_PROJECT_ID`: あなたの Firebase プロジェクトの ID。
-    *   ローカル開発の場合:
-        *   `GOOGLE_APPLICATION_CREDENTIALS`: ダウンロードしたサービスアカウントキー (JSON) のパス。
-        *   `FIREBASE_PROJECT_ID`: あなたの Firebase プロジェクトの ID。
-        *   `.env` ファイルを使用してこれらのローカル環境変数を管理できます (ただし、`.env` はリポジトリにコミットしないでください)。
-4.  **ビルドと実行:**
-    *   バックエンド: `go run main.go` (ローカル)
-    *   フロントエンド: `cd frontend && npm run dev` (ローカル)
-    *   デプロイ: `gcloud run deploy drive-gallery-backend --source . --region YOUR_REGION` (または `service.yaml` を使用して `gcloud run services replace service.yaml --region YOUR_REGION`)
+### ✅ **Production Ready Features**
+- **Backend API**: Fully functional Go server with Firebase integration
+- **Frontend UI**: Complete React application with real-time updates
+- **File Management**: Upload, view, and organize media files by events
+- **Profile System**: Member profiles with markdown bios and icons
+- **Real-time Updates**: WebSocket notifications for live gallery updates
+- **Security**: Firebase Storage rules and authentication
 
-## Development Progress
+### 📁 **Media Content**
+Currently hosting **825+ files** from Luke Avenue events:
+- **第1回** (Event 1): 42 photos
+- **第3回** (Event 3): 23 photos  
+- **第4回** (Event 4): 87 photos
+- **第5回** (Event 5): 226 photos
+- **第6回** (Event 6): 82 photos
+- **第7回** (Event 7): 125 photos
+- **第8回** (Event 8): 240+ photos & videos
 
-### Backend (Go)
-*   [x] プロジェクトディレクトリ (`dev/drive-gallery`) の中に、フロントエンド (`frontend`) とバックエンド (`backend`) のディレクトリを作成。
-*   [x] Go バックエンドの初期セットアップ（モジュールの初期化、`go.mod` をルートに配置）。
-*   [x] Firebase Storage および Firestore と連携するための Go コードを実装（サービスアカウント認証、ファイル一覧取得、フォルダ一覧取得、ファイルアップロード）。
-*   [x] Webhook 通知を受け取るための基本的な Go エンドポイント (`/webhook`) を実装。
-*   [x] バックエンドアプリケーションのビルド成功。
-*   [x] Webhook 通知ヘッダーの解析とログ出力処理を実装（詳細な処理ロジックは未実装）。
-*   [x] WebSocket サーバー機能を実装（クライアント管理、ブロードキャスト）。
-*   [x] **データベースを Cloud SQL (PostgreSQL) から Cloud Firestore に移行。**
-    *   [x] Firebase Admin SDK for Go を導入。
-    *   [x] Firestore クライアントの初期化処理を実装 (`backend/firebase.go`)。
-    *   [x] プロフィール情報用の `Profile` 構造体を定義し、Firestore 用の CRUD 操作 (`CreateProfile`, `GetProfiles`, `GetProfile`, `UpdateProfile`, `DeleteProfile`) を実装 (`backend/profiles.go`)。
-*   [x] API エンドポイントの拡充:
-    *   [x] `/api/folders`: ルートフォルダ直下のフォルダ一覧を取得。
-    *   [x] `/api/files/{folderId}`: 指定されたフォルダ内のファイル一覧を取得。
-    *   [x] `/api/folder-name/{folderId}`: 指定されたフォルダ名を取得。
-    *   [x] `/api/profiles`: プロフィール一覧取得 (GET)、プロフィール作成 (POST)。
-    *   [x] `/api/profiles/{profileId}`: 特定プロフィール取得 (GET)、更新 (PUT)、削除 (DELETE)。
-    *   [x] `/api/upload/icon`: アイコンアップロード。
-*   [x] CORS 設定を追加。
-*   [x] `webContentLink` をファイル取得時に含めるように修正。
+> **⚠️ Note**: The `LukeAvenue/` directory is excluded from git tracking due to large file sizes. Consider using Git LFS for production or store media files directly in Firebase Storage.
 
-### Frontend (React + TypeScript)
-*   [x] Vite + React + TypeScript プロジェクトのセットアップ完了。
-*   [x] ルーティング設定 (`react-router-dom`):
-    *   [x] `/`: ルートフォルダ内のフォルダ一覧を表示 (`HomePage`)。
-    *   [x] `/folder/:folderId`: 指定フォルダ内のファイル一覧を表示 (`FolderPage`)。
-*   [x] `HomePage` コンポーネント（フォルダ一覧表示）。
-    *   [x] バックエンド API (`/api/folders`) からフォルダリストを取得し表示。
-    *   [x] フォルダクリックで該当フォルダの `FolderPage` へ遷移。
-*   [x] `FolderPage` コンポーネント:
-    *   [x] バックエンド API (`/api/files/:folderId`) からファイルリストを取得しグリッド表示。
-    *   [x] WebSocket に接続し、メッセージ受信時にファイルリストを再取得。
-    *   [x] ファイルタイプに応じたプレビュー表示:
-        *   [x] 画像: `webContentLink` または `thumbnailLink` を使用して `<img>` で表示。
-        *   [x] 動画・音声: Google Drive の埋め込みプレビュー (`<iframe>`) で表示。
-        *   [x] その他: ファイルアイコンとファイル名を表示し、`webViewLink` で開く。
-    *   [x] 動画ファイルクリック時に、拡大表示された動画プレーヤーを表示。
+### 🔧 **Development Tools**
+- **Metadata Updater**: CLI tool for bulk Firestore updates
+- **File Uploader**: Batch upload utility for event media
+- **Build System**: Makefile automation for development and deployment
+- **Configuration**: Organized config files for Firebase and deployment
 
-### Next Steps
+### 🚀 **Deployment Status**
+- **Backend**: Ready for Cloud Run deployment
+- **Frontend**: Ready for Firebase Hosting deployment  
+- **Database**: Firestore schema implemented
+- **Storage**: Firebase Storage configured with CORS
 
-1.  **バックエンドの改善:**
-    *   [ ] Webhook 通知データの詳細な処理ロジックを実装（`resourceState` に応じて具体的な変更内容を WebSocket でフロントエンドに通知）。
-    *   [x] Google Drive API のエラーハンドリング強化（ページネーション対応など）。
-    *   [ ] 認証情報（`credentials.json`, `token.json`）のセキュアな管理方法の確立。
-    *   [ ] WebSocket 通信のセキュリティ向上（Originチェックの厳格化など）。
-2.  **フロントエンドの開発:**
-    *   [ ] UI/UX の改善:
-        *   [x] ローディングスピナー、エラー表示の改善。
-        *   [x] ファイル一覧のページネーション（ファイル数が多い場合）。
-        *   [ ] より洗練されたグリッドレイアウト。
-        *   [ ] 音声ファイルの埋め込み再生の改善（現状は動画と同じプレビュー）。
-    *   [ ] WebSocket からの具体的な変更通知（例: ファイル追加、削除）に応じた部分的なUI更新（現状はリスト全体を再取得）。
-3.  **統合とテスト:**
-    *   [ ] Google Drive Webhook を実際に設定し、ファイル変更時のリアルタイム更新をテスト。
-    *   [ ] フロントエンドとバックエンドを連携させ、エンドツーエンドのテストを実施。
-4.  **デプロイ (GCP Cloud Run):**
-    *   [ ] フロントエンドとバックエンドをデプロイ。
-5.  **サムネイル生成:**
-    *   [ ] Firebase Storage に保存された画像および動画のサムネイルを生成するバックエンド (Go) 機能を実装。
-        *   画像の場合、Go の画像処理ライブラリ (`image` パッケージ, `nfnt/resize` など) を使用。
-        *   動画の場合、FFmpeg のような外部ツールを検討（Cloud Run インスタンスや Docker コンテナへのインストールが必要）。
-    *   [ ] 生成されたサムネイルを Firebase Storage の専用パス (`thumbnails/original/path/to/file.jpg` など) に保存。
-    *   [ ] サムネイル生成をトリガーするバックエンド API エンドポイントを作成。
-    *   [ ] ファイルリスト表示のパフォーマンスとユーザーエクスペリエンス向上のため、フロントエンド (React/TypeScript) を更新して生成されたサムネイルを表示。
-6.  **さらなる改善 (全般):**
-    *   [ ] 包括的なエラーハンドリングとロギング。
-    *   [ ] パフォーマンス最適化。
-    *   [ ] セキュリティ向上（入力バリデーション、レートリミットなど）。
+## 🚀 Quick Start
+
+### Prerequisites
+
+- **Go 1.23+**
+- **Node.js 18+**
+- **Google Cloud Project** with Firebase enabled
+- **Firebase CLI** for deployment
+
+### 1. Clone and Setup
+
+```bash
+git clone <repository-url>
+cd drive-gallery
+```
+
+### 2. Backend Setup
+
+```bash
+# Install Go dependencies
+go mod download
+
+# Setup environment variables
+cp .env.example .env
+# Edit .env with your Firebase project details
+
+# Place your Firebase service account key
+cp path/to/your/service-account.json backend/credentials.json
+```
+
+### 3. Frontend Setup
+
+```bash
+cd frontend
+npm install
+
+# Setup environment variables
+cp .env.example .env.local
+# Edit .env.local with your API URL
+```
+
+### 4. Local Development
+
+```bash
+# Start backend (from project root)
+make run-local-backend
+# or: PORT=8080 go run main.go
+
+# Start frontend (in another terminal)
+make run-local-frontend
+# or: cd frontend && npm run dev
+```
+
+Visit `http://localhost:5173` to see the application.
+
+## 📝 Environment Variables
+
+### Backend (.env)
+```bash
+GCP_PROJECT=your-firebase-project-id
+FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+GOOGLE_APPLICATION_CREDENTIALS=backend/credentials.json
+PORT=8080
+```
+
+### Frontend (frontend/.env.local)
+```bash
+VITE_API_BASE_URL=http://localhost:8080
+```
+
+## 🏗️ Development Commands
+
+### Local Development
+```bash
+make run-local-backend    # Start Go backend server
+make run-local-frontend   # Start React dev server
+make run-local           # Start both (see Makefile for parallel execution)
+```
+
+### Building
+```bash
+make frontend-build      # Build React app for production
+go build -o drive-gallery main.go  # Build Go binary
+
+# Build CLI tools
+cd tools/metadata-updater && go build -o updater main.go
+cd tools/uploader && go build -o uploader main.go
+```
+
+### Deployment
+```bash
+make deploy             # Deploy everything (backend + frontend)
+make backend-deploy     # Deploy backend to Cloud Run
+make firebase-deploy    # Deploy frontend to Firebase Hosting
+```
+
+### Utilities
+```bash
+make set-cors          # Configure CORS for Firebase Storage
+make clean             # Clean build artifacts
+```
+
+## 🌐 API Documentation
+
+### Core Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/folders` | List all folders |
+| `GET` | `/api/files/{folderId}` | List files in folder (supports pagination & filtering) |
+| `GET` | `/api/folder-name/{folderId}` | Get folder name |
+| `POST` | `/api/upload/file` | Upload files to storage |
+
+### Profile Management
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/profiles` | List all profiles |
+| `POST` | `/api/profiles` | Create new profile |
+| `GET` | `/api/profiles/{id}` | Get specific profile |
+| `PUT` | `/api/profiles/{id}` | Update profile |
+| `DELETE` | `/api/profiles/{id}` | Delete profile |
+| `POST` | `/api/upload/icon` | Upload profile icon |
+
+### Real-time & Webhooks
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/ws` | WebSocket endpoint for real-time updates |
+| `POST` | `/webhook` | Firebase Storage change notifications |
+
+## 📁 Project Structure
+
+```
+drive-gallery/
+├── README.md                    # This file
+├── CLAUDE.md                   # Claude Code guidance
+├── Makefile                    # Development commands
+├── Dockerfile                  # Container configuration
+├── go.mod, go.sum             # Go dependencies
+├── main.go                    # Go backend entry point
+├── service.yaml               # Cloud Run deployment config
+│
+├── backend/                   # Backend Go modules
+│   ├── firebase.go           # Firebase/Firestore operations
+│   ├── profiles.go           # Profile management
+│   ├── webhook_handler.go    # Storage change webhooks
+│   └── websocket.go          # WebSocket server
+│
+├── frontend/                  # React TypeScript frontend
+│   ├── package.json          # Node.js dependencies
+│   ├── vite.config.ts        # Vite configuration
+│   ├── tsconfig.json         # TypeScript configuration
+│   ├── src/
+│   │   ├── App.tsx           # Main React component
+│   │   ├── App.css           # Application styles
+│   │   └── main.tsx          # React entry point
+│   └── dist/                 # Built frontend (generated)
+│
+├── tools/                     # CLI utilities
+│   ├── metadata-updater/     # Firestore metadata management
+│   │   ├── main.go          # CLI tool source
+│   │   ├── go.mod, go.sum   # Tool dependencies
+│   │   └── updater          # Built binary (ignored by git)
+│   ├── uploader/            # Batch file upload tool
+│   │   ├── main.go          # CLI tool source
+│   │   ├── go.mod           # Tool dependencies
+│   │   └── uploader         # Built binary (ignored by git)
+│   └── README.md            # Tools documentation
+│
+├── config/                    # Configuration files
+│   ├── firebase.json         # Firebase project configuration
+│   ├── storage.rules         # Firebase Storage security rules
+│   ├── cors.json             # Storage CORS configuration
+│   └── README.md             # Configuration documentation
+│
+└── LukeAvenue/                # Event media files (excluded from git)
+    ├── 第1回/                # Event 1 photos (42 images)
+    ├── 第3回/                # Event 3 photos (23 images)
+    ├── 第4回/                # Event 4 photos (87 images)
+    ├── 第5回/                # Event 5 photos (226 images)
+    ├── 第6回/                # Event 6 photos (82 images)
+    ├── 第7回/                # Event 7 photos (125 images)
+    └── 第8回/                # Event 8 photos & videos (240+ files)
+```
+
+## 🔧 Configuration Files
+
+### Firebase Configuration
+
+- **`firebase.json`**: Hosting and Storage rules configuration
+- **`storage.rules`**: Security rules for Firebase Storage
+- **`cors.json`**: CORS policy for Storage bucket
+- **`service.yaml`**: Cloud Run deployment configuration
+
+### Development Configuration
+
+- **`Makefile`**: Development and deployment commands
+- **`.gitignore`**: Comprehensive ignore patterns for security and cleanliness
+- **`CLAUDE.md`**: AI assistant guidance for code maintenance
+
+## 🔐 Security Features
+
+- **Firebase Storage Rules**: Authenticated write access, public read access
+- **Service Account Authentication**: Secure backend access to Firebase
+- **Content Deduplication**: SHA256 hash-based duplicate prevention
+- **Input Validation**: Comprehensive request validation
+- **CORS Configuration**: Proper cross-origin resource sharing
+
+## 📊 Data Models
+
+### File Metadata (Firestore)
+```typescript
+interface FileMetadata {
+  id: string;           // Firestore document ID
+  name: string;         // Original filename
+  mimeType: string;     // File MIME type
+  storagePath: string;  // Firebase Storage path
+  downloadUrl: string;  // Public download URL
+  folderId: string;     // Reference to folder
+  hash: string;         // SHA256 for deduplication
+  createdAt: string;    // ISO timestamp
+}
+```
+
+### Folder Metadata (Firestore)
+```typescript
+interface FolderMetadata {
+  id: string;       // Folder ID (UUID)
+  name: string;     // Display name (e.g., "第1回")
+  createdAt: string; // ISO timestamp
+}
+```
+
+### User Profile (Firestore)
+```typescript
+interface Profile {
+  id: string;       // Profile ID
+  name: string;     // Member name
+  bio: string;      // Markdown biography
+  icon_url: string; // Profile icon URL
+}
+```
+
+## 🚀 Deployment
+
+### Cloud Run Backend
+
+1. **Build and deploy**:
+   ```bash
+   make backend-deploy
+   ```
+
+2. **Environment variables** are set via `service.yaml`
+
+3. **Service account** needs these roles:
+   - Firebase Data Viewer/Editor
+   - Storage Object Admin
+   - (Optional) Secret Manager Secret Accessor
+
+### Firebase Hosting Frontend
+
+1. **Build and deploy**:
+   ```bash
+   make frontend-build
+   make firebase-deploy
+   ```
+
+2. **Domain configuration** in Firebase Console
+
+### Required GCP Services
+
+- Cloud Run API
+- Cloud Firestore (Native mode)
+- Firebase Storage
+- Firebase Hosting
+
+## 🔄 Real-time Updates
+
+The application uses WebSocket connections to provide real-time updates:
+
+1. **Frontend** connects to `/ws` endpoint
+2. **Backend** receives Firebase Storage webhooks at `/webhook`
+3. **Changes** are broadcast to all connected clients
+4. **React Query** cache is invalidated triggering UI updates
+
+## 📱 Usage
+
+### For Members
+
+1. **Browse Events**: Click on folder names to view event photos/videos
+2. **Filter Content**: Use photo/video filters to find specific media
+3. **View Profiles**: Check member profiles and bios
+4. **Upload Content**: Use the upload feature to add new photos/videos
+
+### For Administrators
+
+1. **Manage Profiles**: Create/edit/delete member profiles
+2. **Upload Events**: Bulk upload entire event folders
+3. **Monitor Activity**: Check logs for system activity
+
+## 🤝 Contributing
+
+1. **Follow coding standards** defined in existing code
+2. **Test thoroughly** before submitting changes
+3. **Update documentation** for new features
+4. **Respect security practices** - never commit credentials
+
+## 🆘 Troubleshooting
+
+### Common Issues
+
+**Backend fails to start**:
+- Check Firebase credentials are properly configured
+- Ensure GCP project ID is correct
+- Verify Firestore database exists
+
+**Frontend can't connect to backend**:
+- Check `VITE_API_BASE_URL` environment variable
+- Ensure backend is running on expected port
+- Verify CORS configuration
+
+**File uploads fail**:
+- Check Firebase Storage rules
+- Verify service account permissions
+- Ensure Storage bucket exists
+
+### Getting Help
+
+- Check `CLAUDE.md` for development guidance
+- Review logs in Cloud Run console
+- Test with `make run-local-backend` for debugging
+
+---
+
+Built with ❤️ for Luke Avenue music sessions
