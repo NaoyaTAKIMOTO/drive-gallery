@@ -1,39 +1,85 @@
 # Go
-# コンパイルされた実行可能ファイル
+# Compiled binaries
 main
+drive-gallery
 *.exe
 *.out
+*.test
 
-# 依存関係 (もし vendor/ を使う場合)
-# vendor/
+# Go dependencies (if using vendor/)
+vendor/
 
-# OS固有ファイル
+# OS-specific files
 .DS_Store
 Thumbs.db
 ._*
+*~
 
-# IDE/エディタ設定
+# IDE/Editor settings
 .vscode/
 .idea/
 *.swp
-*~
+*.swo
+.editorconfig
 
-# ログファイル
+# Log files
 *.log
 
-# 機密情報
+# Credentials and secrets
 token.json
 backend/credentials.json
 backend/token.json
+*.json.bak
+*credentials*.json
+*service-account*.json
+drivegallery-*.json
 
-# 環境変数ファイル (もしあれば)
-# .env
-drivegallery-460509-e833751c168d.json
-node_modules/
+# Environment files
 .env
-drivegallery-460509-940d67da0b0e.json
-backend/drive_api.go
+.env.local
+.env.production
+.env.staging
+.env.*.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Build outputs
+dist/
+build/
+*.tar.gz
+*.zip
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Firebase
+.firebase/
 .firebaserc
-drive-gallery.db
-.firebase/hosting.ZGlzdA.cache
-.firebase/hosting.ZnJvbnRlbmQvZGlzdA.cache
+
+# CLI tools
+cli_metadata_updater/updater
+cli_uploader/uploader
+
+# Large media directories (should use Git LFS or external storage)
+LukeAvenue/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Coverage and testing
+coverage/
+*.cover
+*.out
+
+# Docker
+.dockerignore
