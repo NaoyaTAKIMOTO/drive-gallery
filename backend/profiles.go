@@ -3,24 +3,30 @@ package backend
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"path/filepath"
+	"time"
 
 	"cloud.google.com/go/firestore"
+	gcs "cloud.google.com/go/storage" // Google Cloud Storage client for ACL
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-const profileCollection = "profiles"
+const (
+	profileCollection = "profiles" // Collection name for profiles
+)
 
 // Profile represents a user's profile.
 // Firestoreタグは、Firestoreドキュメントのフィールド名とGo構造体のフィールドをマッピングします。
 // `firestore:"-"` はそのフィールドをFirestoreに保存しないことを意味します。
 type Profile struct {
 	ID      string `json:"id" firestore:"-"` // Firestore document ID, not stored as a field in the document
-	Name    string `json:"name"`             // Removed firestore tag
-	Bio     string `json:"bio"`              // Removed firestore tag
-	IconURL string `json:"icon_url,omitempty"` // Removed firestore tag
+	Name    string `json:"name"`
+	Bio     string `json:"bio"`
+	IconURL string `json:"icon_url,omitempty"`
 	// Add other profile fields here
 }
 
@@ -34,7 +40,7 @@ func CreateProfile(ctx context.Context, profile Profile) (string, error) {
 	// Add a new document with an auto-generated ID to the "profiles" collection.
 	docRef, _, err := Client.Collection(profileCollection).Add(ctx, map[string]interface{}{
 		"name":    profile.Name,
-		"bio":     profile.Bio, // Changed from description to bio
+		"bio":     profile.Bio,
 		"iconURL": profile.IconURL,
 		// Add other fields here, ensure they match the Profile struct and Firestore needs
 	})
@@ -44,6 +50,60 @@ func CreateProfile(ctx context.Context, profile Profile) (string, error) {
 	}
 	log.Printf("Successfully created profile with ID: %s", docRef.ID)
 	return docRef.ID, nil
+}
+
+// UploadProfileIcon uploads an icon to Firebase Storage and returns its public URL.
+func UploadProfileIcon(ctx context.Context, profileID string, file io.Reader, filename string, contentType string) (string, error) {
+	if StorageClient == nil {
+		return "", fmt.Errorf("firebase Storage client not initialized")
+	}
+	if profileID == "" {
+		return "", fmt.Errorf("profile ID cannot be empty")
+	}
+
+	// Get the default bucket. You might need to specify a bucket name if not using the default.
+	// The bucket name is now configured via the Firebase App initialization.
+	bucket, err := StorageClient.DefaultBucket() // Use DefaultBucket()
+	if err != nil {
+		return "", fmt.Errorf("failed to get bucket: %v", err)
+	}
+
+	// Generate a unique file path in Storage
+	// Example: profiles/{profileID}/icons/{timestamp}_{original_filename_without_ext}.{ext}
+	ext := filepath.Ext(filename)
+	baseFilename := filename[:len(filename)-len(ext)]
+	objectName := fmt.Sprintf("profiles/%s/icons/%d_%s%s", profileID, time.Now().UnixNano(), baseFilename, ext)
+
+	wc := bucket.Object(objectName).NewWriter(ctx)
+	wc.ContentType = contentType
+
+	if _, err := io.Copy(wc, file); err != nil {
+		wc.Close()
+		log.Printf("Error uploading file to Storage: %v", err)
+		return "", fmt.Errorf("failed to upload file to Storage: %v", err)
+	}
+	if err := wc.Close(); err != nil {
+		log.Printf("Error closing Storage writer: %v", err)
+		return "", fmt.Errorf("failed to close Storage writer: %v", err)
+	}
+
+	// Make the file public (optional, depending on security rules)
+	// Note: This requires appropriate Firebase Storage security rules.
+	// For public access, rules like `allow read: if true;` for the path are needed.
+	if err := bucket.Object(objectName).ACL().Set(ctx, gcs.AllUsers, gcs.RoleReader); err != nil {
+		log.Printf("Warning: Could not set public ACL for file %s: %v", objectName, err)
+		// Do not return error, as file is uploaded. Just log warning.
+	}
+
+	attrs, err := bucket.Object(objectName).Attrs(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get storage object attributes: %v", err)
+	}
+	publicURL := attrs.MediaLink // MediaLink is the public download URL
+
+	log.Printf("Successfully uploaded icon to Storage: %s", publicURL)
+
+	return publicURL, nil
 }
 
 // GetProfiles retrieves all profile documents from Firestore.

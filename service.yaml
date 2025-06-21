@@ -24,6 +24,8 @@ spec:
         #       key: latest
         - name: GCP_PROJECT
           value: "drivegallery-460509" # Set the Firebase Project ID explicitly for Cloud Run
+        - name: FIREBASE_STORAGE_BUCKET
+          value: "drivegallery-460509.firebasestorage.app"
         # - name: GOOGLE_APPLICATION_CREDENTIALS # Only needed if not using service account identity
         #   value: "/path/to/serviceAccountKey.json" # Or from Secret Manager
       serviceAccountName: 685534023335-compute@developer.gserviceaccount.com # Ensure this SA has Firestore permissions

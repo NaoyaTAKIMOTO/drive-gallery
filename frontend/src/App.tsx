@@ -1,37 +1,39 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Link, useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'; // Added useMutation
-import ReactMarkdown from 'react-markdown'; // Will be installed
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import ReactMarkdown from 'react-markdown';
 import './App.css';
 
-// Define the structure of a file object based on backend response
-interface DriveFile {
-  id: string;
+// Define the structure of a file object based on backend response (Firebase Storage + Firestore)
+interface FileMetadata {
+  id: string; // Firestore document ID, same as Storage path
   name: string;
   mimeType: string;
-  webViewLink?: string;
-  thumbnailLink?: string;
-  webContentLink?: string;
+  storagePath: string; // Path in Firebase Storage
+  downloadUrl: string; // Public download URL
+  folderId: string; // Corresponds to a logical folder
+  hash: string; // SHA256 hash for deduplication
+  createdAt: string; // ISO string for time.Time
 }
 
 // Define the structure for the paginated response from backend
 interface PaginatedFilesResponse {
-  data: DriveFile[];
+  data: FileMetadata[];
   nextPageToken: string;
 }
 
-// Define the structure for a folder object
-interface DriveFolder {
+// Define the structure for a folder object (from Firestore)
+interface FolderMetadata {
   id: string;
   name: string;
-  mimeType: string;
+  createdAt: string; // ISO string for time.Time
 }
 
 // --- HomePage Component ---
 function HomePage() {
   const navigate = useNavigate();
 
-  const { data: folders, isLoading, error } = useQuery<DriveFolder[], Error>({
+  const { data: folders, isLoading, error } = useQuery<FolderMetadata[], Error>({
     queryKey: ['folders'],
     queryFn: async () => {
       console.log('Fetching folders...');
@@ -70,9 +72,8 @@ function HomePage() {
                   console.log(`Item clicked for folder: ${folder.name}, ID: ${folder.id}`);
                   navigate(`/folder/${folder.id}`);
                 }}
-                style={{ cursor: 'pointer' }} // Add pointer cursor to indicate clickable
+                style={{ cursor: 'pointer' }}
             >
-              {/* Removed Link component, li itself is now the clickable trigger */}
               📁 {folder.name}
             </li>
           ))}
@@ -84,15 +85,18 @@ function HomePage() {
 
 // --- FolderPage Component ---
 function FolderPage() {
-  const { folderId } = useParams<{ folderId: string }>();
-  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const params = useParams(); // params will now contain a key like '*'
+  const folderId = params['*']; // Get the full path after /folder/
+  console.log('FolderPage: folderId from params:', folderId); // Add this log
+  const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null); // Store URL directly
+  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null); // Store URL for selected image
   const [filter, setFilter] = useState<'all' | 'image' | 'video'>('all');
   const queryClient = useQueryClient();
 
   // Pagination states
   const [currentPageToken, setCurrentPageToken] = useState<string>('');
-  const [previousPageTokens, setPreviousPageTokens] = useState<string[]>(['']); // Keep track of tokens for "previous" button
-  const pageSize = 20; // Define page size
+  const [previousPageTokens, setPreviousPageTokens] = useState<string[]>(['']);
+  const pageSize = 20;
 
   // Helper function to determine file type
   const getFileType = (mimeType: string) => {
@@ -101,21 +105,27 @@ function FolderPage() {
     return 'other';
   };
 
-  const handleFileClick = (file: DriveFile) => {
+  const handleFileClick = (file: FileMetadata) => {
     console.log('handleFileClick triggered for file:', file.name, 'ID:', file.id, 'MIME Type:', file.mimeType);
     if (getFileType(file.mimeType) === 'video') {
-      setSelectedVideoId(file.id);
-      console.log('setSelectedVideoId called with ID:', file.id);
-    } else if (file.webViewLink) {
-        window.open(file.webViewLink, '_blank', 'noopener,noreferrer');
+      setSelectedVideoUrl(file.downloadUrl); // Set video URL for player
+      console.log('setSelectedVideoUrl called with URL:', file.downloadUrl);
+    } else if (getFileType(file.mimeType) === 'image') { // Handle image click for modal
+      setSelectedImageUrl(file.downloadUrl);
+      console.log('setSelectedImageUrl called with URL:', file.downloadUrl);
     }
+    // Removed window.open for images and other files
   };
 
   const closeSelectedVideo = () => {
-    setSelectedVideoId(null);
+    setSelectedVideoUrl(null);
   };
 
-  // Fetch folder name using React Query (Moved here for better scope visibility)
+  const closeSelectedImage = () => {
+    setSelectedImageUrl(null);
+  };
+
+  // Fetch folder name using React Query
   const { data: folderName, isLoading: isLoadingFolderName, error: folderNameError } = useQuery<string, Error>({
     queryKey: ['folderName', folderId],
     queryFn: async () => {
@@ -133,23 +143,24 @@ function FolderPage() {
 
   // Fetch files using React Query
   const { data, isLoading: isLoadingFiles, error: filesError } = useQuery<PaginatedFilesResponse, Error>({
-    queryKey: ['files', folderId, currentPageToken, pageSize, filter], // Add filter to queryKey
+    queryKey: ['files', folderId, currentPageToken, pageSize, filter],
     queryFn: async () => {
       if (!folderId) throw new Error('Folder ID is missing');
       let url = `${import.meta.env.VITE_API_BASE_URL}/api/files/${folderId}?pageSize=${pageSize}&pageToken=${currentPageToken}`;
       if (filter !== 'all') {
-        url += `&filter=${filter}`; // Add filter parameter if not 'all'
+        url += `&filter=${filter}`;
       }
+      console.log('Fetching files from URL:', url); // Log the URL
       const response = await fetch(url);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
       const result = await response.json();
-      return result; // Expecting { data: [], nextPageToken: "" }
+      console.log('Files fetched successfully. Data:', result); // Log the fetched data
+      return result;
     },
     enabled: !!folderId,
-    // staleTime: Infinity, // Removed to ensure data refetches on pageToken change
   });
 
   // Extract files and nextPageToken from the data
@@ -158,31 +169,136 @@ function FolderPage() {
 
   const handleNextPage = () => {
     if (nextPageToken) {
-      setPreviousPageTokens(prev => [...prev, currentPageToken]); // 古いページトークンを履歴に追加
-      setCurrentPageToken(nextPageToken); // 現在のページトークンを更新
+      setPreviousPageTokens((prev: string[]) => [...prev, currentPageToken]);
+      setCurrentPageToken(nextPageToken);
     }
   };
 
   const handlePreviousPage = () => {
-    if (previousPageTokens.length > 0) { // 履歴がある場合
+    if (previousPageTokens.length > 0) {
       const newPreviousTokens = [...previousPageTokens];
-      const prevToken = newPreviousTokens.pop(); // 履歴から最後のトークン（現在のページの前のトークン）を取得
-      setCurrentPageToken(prevToken || ''); // そのトークンを現在のページトークンに設定（空の場合は最初のページ）
-      setPreviousPageTokens(newPreviousTokens); // 履歴を更新
+      const prevToken = newPreviousTokens.pop();
+      setCurrentPageToken(prevToken || '');
+      setPreviousPageTokens(newPreviousTokens);
     }
   };
 
-  const hasNextPage = !!nextPageToken; // Check if there's a next page
-  const hasPreviousPage = previousPageTokens.length > 1 || (previousPageTokens.length === 1 && currentPageToken !== ''); // Check if there's a previous page
+  const hasNextPage = !!nextPageToken;
+  const hasPreviousPage = previousPageTokens.length > 1 || (previousPageTokens.length === 1 && currentPageToken !== '');
+ 
+  // File Upload States
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState('');
 
-  // WebSocket for real-time updates (Moved here, after data fetching hooks)
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      setSelectedFiles(Array.from(event.target.files));
+    } else {
+      setSelectedFiles([]);
+    }
+  };
+
+  // Mutation for uploading files
+  const uploadFileMutation = useMutation({
+    mutationFn: async ({ file, folderName, relativePath }: { file: File; folderName: string; relativePath: string }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('folder_name', folderName);
+      formData.append('relative_path', relativePath);
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/upload/file`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      // Individual file success is handled by the loop, overall success by handleUploadAllFiles
+    },
+    onError: (error) => {
+      console.error(`ファイルのアップロードに失敗しました: ${error.message}`);
+      setUploadStatus(`一部のファイルのアップロードに失敗しました: ${error.message}`);
+    },
+  });
+
+  const handleUploadAllFiles = async () => {
+    if (selectedFiles.length === 0) {
+      alert('アップロードするファイルを選択してください。');
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadStatus('アップロード中...');
+
+    let successfulUploads = 0;
+    let failedUploads = 0;
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      const webkitRelativePath = (file as any).webkitRelativePath || file.name; // Fallback to file.name if webkitRelativePath is not available
+
+      // Extract the top-level folder name from webkitRelativePath
+      let folderName = '';
+      let relativePath = webkitRelativePath;
+
+      const pathParts = webkitRelativePath.split('/');
+      if (pathParts.length > 1) {
+        folderName = pathParts[0];
+        relativePath = pathParts.slice(1).join('/');
+      } else {
+        // If it's a single file not in a folder, use a default folder name or handle as root
+        // For now, let's use the current folderId as the folderName if it's a single file upload
+        // Or, if the user explicitly selects a folder, the first part of webkitRelativePath is the folder name.
+        // If it's just a file, we can use a generic "Uploaded Files" folder or the current folderId.
+        // Given the user wants "第1回" etc., we should ensure folderName is derived from the selected folder.
+        // If a single file is selected without a folder, we might need a different approach or prompt the user.
+        // For now, if webkitRelativePath has no slashes, assume it's a file directly in the target folder.
+        // The user's request implies uploading *folders*, so webkitRelativePath will likely have a folder name.
+        folderName = folderId || 'Uploaded Files'; // Fallback if no folder context
+        relativePath = file.name; // Use original file name as relative path
+      }
+
+      try {
+        await uploadFileMutation.mutateAsync({ file, folderName, relativePath });
+        successfulUploads++;
+      } catch (error) {
+        failedUploads++;
+        console.error(`ファイル ${file.name} のアップロードに失敗しました:`, error);
+      }
+      setUploadProgress(Math.round(((i + 1) / selectedFiles.length) * 100));
+    }
+
+    setUploading(false);
+    setSelectedFiles([]); // Clear selected files after upload attempt
+
+    if (successfulUploads > 0 && failedUploads === 0) {
+      setUploadStatus('すべてのファイルが正常にアップロードされました！');
+      alert('すべてのファイルが正常にアップロードされました！');
+    } else if (successfulUploads > 0 && failedUploads > 0) {
+      setUploadStatus(`${successfulUploads} 個のファイルがアップロードされ、${failedUploads} 個のファイルが失敗しました。`);
+      alert(`${successfulUploads} 個のファイルがアップロードされ、${failedUploads} 個のファイルが失敗しました。`);
+    } else {
+      setUploadStatus('ファイルのアップロードに失敗しました。');
+      alert('ファイルのアップロードに失敗しました。');
+    }
+    queryClient.invalidateQueries({ queryKey: ['files', folderId] }); // Re-fetch files after successful upload
+    queryClient.invalidateQueries({ queryKey: ['folders'] }); // Re-fetch folders to show new ones
+  };
+
+  // WebSocket for real-time updates
   useEffect(() => {
     if (!folderId) return;
     const ws = new WebSocket(`${import.meta.env.VITE_API_BASE_URL.replace('http', 'ws')}/ws`);
     ws.onopen = () => console.log(`WebSocket connection established for folder context: ${folderId}`);
     ws.onmessage = (event) => {
       console.log('WebSocket message received on FolderPage:', event.data);
-      // Invalidate queries to refetch data
       queryClient.invalidateQueries({ queryKey: ['files', folderId] });
       queryClient.invalidateQueries({ queryKey: ['folderName', folderId] });
     };
@@ -193,52 +309,53 @@ function FolderPage() {
         ws.close(1000, "Component unmounting from FolderPage");
       }
     };
-  }, [folderId, queryClient]); // Add queryClient to dependencies
+  }, [folderId, queryClient]);
 
-  const renderMediaPreview = (file: DriveFile, isSelectedVideoPlayer = false) => {
+  const renderMediaPreview = (file: FileMetadata, isSelectedVideoPlayer = false) => {
     const commonLinkProps = { target: "_blank", rel: "noopener noreferrer" };
-    const embedBaseUrl = "https://drive.google.com/file/d/";
-    console.log(`renderMediaPreview: file.name=${file.name}, file.mimeType=${file.mimeType}, isSelectedVideoPlayer=${isSelectedVideoPlayer}`); // Debug log
+    console.log(`renderMediaPreview: file.name=${file.name}, file.mimeType=${file.mimeType}, isSelectedVideoPlayer=${isSelectedVideoPlayer}, downloadUrl=${file.downloadUrl}`);
 
-    if (isSelectedVideoPlayer) { // Logic for the large selected video player
+    if (isSelectedVideoPlayer) {
       if (!file.mimeType.startsWith('video/') && !file.mimeType.startsWith('audio/')) {
-        return null; // Only show video/audio in the large player
+        return null;
       }
-      const embedUrl = `${embedBaseUrl}${file.id}/preview`;
       return (
-        <iframe
-          src={embedUrl}
-          className="selected-video-iframe" // Specific class for large player iframe
-          allow="autoplay; encrypted-media"
-          allowFullScreen
+        <video
+          src={file.downloadUrl}
+          controls
+          autoPlay
+          className="selected-video-iframe" // Reusing class name for styling consistency
           title={file.name}
           style={{ border: 'none', width: '100%', height: '100%' }}
-        ></iframe>
+        >
+          Your browser does not support the video tag.
+        </video>
       );
-    } else { // Logic for grid items
+    } else {
       if (file.mimeType.startsWith('image/')) {
-        return <img src={file.webContentLink || file.thumbnailLink} alt={file.name} className="media-preview" loading="lazy" onError={(e) => (e.currentTarget.src = file.thumbnailLink || '')} onClick={() => handleFileClick(file)} />;
+        return <img src={file.downloadUrl} alt={file.name} className="media-preview" loading="lazy" onClick={() => handleFileClick(file)} />;
       } else if (file.mimeType.startsWith('video/') || file.mimeType.startsWith('audio/')) {
-        const embedUrl = `${embedBaseUrl}${file.id}/preview`;
         return (
-          <div style={{ position: 'relative', width: '100%', height: '150px' }}> {/* Grid item height for wrapper */}
-            <iframe
-              src={embedUrl}
-              className="media-preview" // General class for grid iframe
-              allowFullScreen // No autoplay for grid previews
+          <div style={{ position: 'relative', width: '100%', height: '150px' }}>
+            <video
+              src={file.downloadUrl}
+              className="media-preview"
               title={file.name}
               style={{ border: 'none', width: '100%', height: '100%' }}
-            ></iframe>
+              preload="metadata" // Load metadata to show first frame if possible
+            >
+              Your browser does not support the video tag.
+            </video>
             <div className="media-overlay" onClick={() => handleFileClick(file)}></div>
           </div>
         );
-      } else { // Fallback for other file types in grid
+      } else {
         return (
           <div className="media-preview-placeholder" onClick={() => handleFileClick(file)}>
             <span role="img" aria-label="file icon" style={{fontSize: "2em"}}>📄</span>
             <p className="file-name-placeholder">{file.name}</p>
             <p className="file-type-placeholder"><small>{file.mimeType}</small></p>
-            {file.webViewLink && <a href={file.webViewLink} {...commonLinkProps} onClick={(e) => { e.stopPropagation(); window.open(file.webViewLink!, '_blank', 'noopener,noreferrer'); }}>View on Drive</a>}
+            {file.downloadUrl && <a href={file.downloadUrl} {...commonLinkProps} onClick={(e) => { e.stopPropagation(); window.open(file.downloadUrl, '_blank', 'noopener,noreferrer'); }}>Download File</a>}
           </div>
         );
       }
@@ -257,15 +374,11 @@ function FolderPage() {
     return <div className="page-container">Error fetching folder name for folder {folderId}: {folderNameError.message}</div>;
   }
 
-  // Filtered files based on the current filter state (now handled by backend)
-  // This client-side filtering is no longer strictly necessary if backend filters,
-  // but keeping it for robustness or if backend filter is not exhaustive.
-  // However, for now, we assume backend handles filtering.
-  const filteredFiles = files; // No client-side filtering needed if backend filters
+  const filteredFiles = files;
 
   return (
     <div className="page-container">
-      <h1>Files in: {folderName || folderId}</h1> {/* Use folderName if available, otherwise folderId */}
+      <h1>Files in: {folderName || folderId}</h1>
       <p className="breadcrumb-link"><Link to="/">↩ Back to Folders</Link></p>
 
       <div className="filter-buttons">
@@ -274,13 +387,35 @@ function FolderPage() {
         <button onClick={() => setFilter('video')} className={filter === 'video' ? 'active' : ''}>動画 🎥</button>
       </div>
 
-      {selectedVideoId && (
+      {/* File Upload Section */}
+      {/* File Upload Section */}
+      <div className="file-upload-section">
+        {/* @ts-ignore */}
+        <input type="file" onChange={handleFileChange} webkitdirectory="true" directory="true" multiple />
+        <button 
+          onClick={handleUploadAllFiles} 
+          disabled={selectedFiles.length === 0 || uploading}
+        >
+          {uploading ? `アップロード中... (${uploadProgress}%)` : 'フォルダ/ファイルをアップロード'}
+        </button>
+        {uploading && <p>進捗: {uploadProgress}%</p>}
+        {uploadStatus && <p>{uploadStatus}</p>}
+      </div>
+
+      {selectedVideoUrl && (
         <div className="selected-video-container">
           <button onClick={closeSelectedVideo} className="close-selected-video-button">×</button>
           {(() => {
-            const selectedFile = (files || []).find(f => f.id === selectedVideoId);
+            const selectedFile = (files || []).find(f => f.downloadUrl === selectedVideoUrl); // Find by downloadUrl
             return selectedFile ? renderMediaPreview(selectedFile, true) : null;
           })()}
+        </div>
+      )}
+
+      {selectedImageUrl && (
+        <div className="selected-image-modal-container">
+          <button onClick={closeSelectedImage} className="close-selected-image-button">×</button>
+          <img src={selectedImageUrl} alt="Selected Image" className="selected-image-modal" />
         </div>
       )}
 
@@ -312,7 +447,7 @@ function FolderPage() {
 
 // Define the structure of a Profile object
 interface Profile {
-  id?: string; // Changed from number to string, as Firestore IDs are strings
+  id?: string; // Firestore document ID, optional for new profiles
   name: string;
   bio: string;
   icon_url: string;
@@ -373,20 +508,20 @@ function ProfileEditForm() {
   const queryClient = useQueryClient();
 
   const isNew = id === 'new';
-  const profileId = isNew ? null : id; // Use id directly as string
+  const profileId: string | null = isNew ? null : (id || null);
 
   console.log('ProfileEditForm: id param =', id);
   console.log('ProfileEditForm: isNew =', isNew);
-  console.log('ProfileEditForm: profileId (string) =', profileId);
+  console.log('ProfileEditForm: profileId (string | null) =', profileId);
 
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [iconFile, setIconFile] = useState<File | null>(null);
-  const [iconPreviewUrl, setIconPreviewUrl] = useState<string | null>(null);
+  const [currentIconUrl, setCurrentIconUrl] = useState<string>('');
 
   // Fetch existing profile data if editing
   const { data: existingProfile, isLoading: isLoadingProfile, error: profileError } = useQuery<Profile, Error>({
-    queryKey: ['profile', profileId],
+    queryKey: ['profile', profileId || null],
     queryFn: async () => {
       if (!profileId) throw new Error('Profile ID is missing');
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/profiles/${profileId}`);
@@ -396,7 +531,7 @@ function ProfileEditForm() {
       }
       return await response.json();
     },
-    enabled: !isNew && !!profileId, // Only fetch if not new and ID is valid
+    enabled: !isNew && !!profileId,
   });
 
   useEffect(() => {
@@ -404,11 +539,31 @@ function ProfileEditForm() {
       console.log('ProfileEditForm: existingProfile data received:', existingProfile);
       setName(existingProfile.name);
       setBio(existingProfile.bio);
-      setIconPreviewUrl(existingProfile.icon_url);
+      setCurrentIconUrl(existingProfile.icon_url || '');
     } else {
       console.log('ProfileEditForm: existingProfile is null or undefined.');
+      setCurrentIconUrl('');
     }
   }, [existingProfile]);
+
+  // Mutation for uploading icon
+  const uploadIconMutation = useMutation({
+    mutationFn: async ({ file, profileId: idToUpload }: { file: File; profileId: string }) => {
+      const formData = new FormData();
+      formData.append('icon', file);
+      formData.append('profile_id', idToUpload);
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/upload/icon`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
+    },
+  });
 
   const createProfileMutation = useMutation({
     mutationFn: async (newProfile: Profile) => {
@@ -444,49 +599,65 @@ function ProfileEditForm() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profiles'] });
-      queryClient.invalidateQueries({ queryKey: ['profile', profileId] });
+      if (profileId) {
+        const keyProfileId: string = profileId;
+        queryClient.invalidateQueries({ queryKey: ['profile', keyProfileId] });
+      }
       navigate('/profiles');
     },
   });
 
-  const uploadIconMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append('icon', file);
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/upload/icon`, {
-        method: 'POST',
-        body: formData,
+  // Mutation for deleting profile
+  const deleteProfileMutation = useMutation({
+    mutationFn: async (idToDelete: string) => {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/profiles/${idToDelete}`, {
+        method: 'DELETE',
       });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
-      const result = await response.json();
-      return result.icon_url;
+      return true;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      navigate('/profiles');
     },
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    let finalIconUrl = iconPreviewUrl || '';
-
-    if (iconFile) {
-      try {
-        finalIconUrl = await uploadIconMutation.mutateAsync(iconFile);
-      } catch (uploadError) {
-        alert(`アイコンのアップロードに失敗しました: ${uploadError}`);
-        return;
-      }
-    }
-
-    const profileData: Profile = { name, bio, icon_url: finalIconUrl };
+    let finalIconUrl = currentIconUrl;
 
     try {
+      let profileToSave: Profile;
+      let createdProfileId: string | null = profileId;
+
       if (isNew) {
-        await createProfileMutation.mutateAsync(profileData);
+        const tempProfile: Profile = { name, bio, icon_url: '' };
+        const createdProfile = await createProfileMutation.mutateAsync(tempProfile);
+        createdProfileId = createdProfile.id || null;
+        if (!createdProfileId) {
+          throw new Error('Failed to get ID for new profile.');
+        }
+        profileToSave = { ...createdProfile, name, bio };
+      } else {
+        profileToSave = { name, bio, icon_url: currentIconUrl, id: profileId! };
+      }
+
+      if (iconFile && createdProfileId) {
+        const uploadResult = await uploadIconMutation.mutateAsync({ file: iconFile, profileId: createdProfileId });
+        finalIconUrl = uploadResult.icon_url;
+        profileToSave.icon_url = finalIconUrl;
+      } else if (iconFile && !createdProfileId) {
+        throw new Error('Cannot upload icon without a profile ID.');
+      }
+
+      if (isNew) {
+        await updateProfileMutation.mutateAsync({ ...profileToSave, id: createdProfileId! });
       } else if (profileId) {
-        await updateProfileMutation.mutateAsync({ ...profileData, id: profileId });
+        await updateProfileMutation.mutateAsync({ ...profileToSave, id: profileId });
       }
       alert('プロフィールを保存しました！');
     } catch (saveError) {
@@ -494,16 +665,21 @@ function ProfileEditForm() {
     }
   };
 
-  const handleIconChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setIconFile(file);
-      setIconPreviewUrl(URL.createObjectURL(file)); // Create a local URL for preview
-    } else {
-      setIconFile(null);
-      setIconPreviewUrl(null);
+  const handleDelete = async () => {
+    if (!profileId) {
+      alert('削除するプロフィールが選択されていません。');
+      return;
+    }
+    if (window.confirm('本当にこのプロフィールを削除しますか？')) {
+      try {
+        await deleteProfileMutation.mutateAsync(profileId);
+        alert('プロフィールを削除しました。');
+      } catch (deleteError) {
+        alert(`プロフィールの削除に失敗しました: ${deleteError}`);
+      }
     }
   };
+
 
   if (!isNew && isLoadingProfile) {
     return <div className="page-container">Loading profile for editing...</div>;
@@ -540,21 +716,30 @@ function ProfileEditForm() {
         </div>
         <div className="form-group">
           <label htmlFor="icon">アイコン画像:</label>
+          {currentIconUrl && (
+            <div className="current-icon-preview">
+              <p>現在のアイコン:</p>
+              <img src={currentIconUrl} alt="Current Icon" className="profile-icon-preview" />
+            </div>
+          )}
           <input
             type="file"
             id="icon"
             accept="image/*"
-            onChange={handleIconChange}
+            onChange={(e) => setIconFile(e.target.files ? e.target.files[0] : null)}
           />
-          {iconPreviewUrl && (
-            <div className="icon-preview">
-              <img src={iconPreviewUrl} alt="Icon Preview" />
-            </div>
+          {iconFile && <p>選択中のファイル: {iconFile.name}</p>}
+        </div>
+        <div className="form-actions">
+          <button type="submit" disabled={createProfileMutation.isPending || updateProfileMutation.isPending || uploadIconMutation.isPending}>
+            {createProfileMutation.isPending || updateProfileMutation.isPending || uploadIconMutation.isPending ? '保存中...' : '保存'}
+          </button>
+          {!isNew && (
+            <button type="button" onClick={handleDelete} className="delete-button" disabled={deleteProfileMutation.isPending}>
+              {deleteProfileMutation.isPending ? '削除中...' : '削除'}
+            </button>
           )}
         </div>
-        <button type="submit" disabled={createProfileMutation.isPending || updateProfileMutation.isPending || uploadIconMutation.isPending}>
-          {createProfileMutation.isPending || updateProfileMutation.isPending || uploadIconMutation.isPending ? '保存中...' : '保存'}
-        </button>
       </form>
     </div>
   );
@@ -568,7 +753,7 @@ function App() {
       <main>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/folder/:folderId" element={<FolderPage />} />
+          <Route path="/folder/*" element={<FolderPage />} />
           <Route path="/profiles" element={<ProfileList />} />
           <Route path="/profiles/:id/edit" element={<ProfileEditForm />} />
         </Routes>

@@ -1,46 +1,29 @@
 package main
 
 import (
-	// "context" // No longer directly used in main.go
+	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil" // Added for ioutil.ReadAll
+	"io" // Add io import
 	"log"
 	"net/http"
-	"os"      // Added for os.Getenv
-	"strconv" // Added for parsing pageSize
-	"strings" // Added for path parsing
-	"time"    // Added for time.Sleep
+	"os"
+	"strconv"
+	"strings"
+	"time"
 
-	"drive-gallery/backend" // Import the local backend package
-	"context" // Added for context.Background
+	"drive-gallery/backend"
 
-	"github.com/joho/godotenv" // Added for .env file loading
+	"github.com/joho/godotenv"
 )
 
-// var driveService *drive.Service // Global variable for Drive service - will use backend.DriveService
-
 func main() {
-	// Load .env file if it exists
-	if err := godotenv.Load(); err != nil { // errを再利用
+	if err := godotenv.Load(); err != nil {
 		log.Printf("WARNING: Error loading .env file: %v (This is normal if not running locally with a .env file)", err)
 	}
 
-	// Log environment variables for debugging
-	// log.Printf("DEBUG: DATABASE_URL: %s", os.Getenv("DATABASE_URL")) // No longer using DATABASE_URL
-	// dbPassword := os.Getenv("DB_PASSWORD") // No longer using DB_PASSWORD
-	// if len(dbPassword) > 4 {
-	// 	log.Printf("DEBUG: DB_PASSWORD: %s...", dbPassword[:4]) // Mask password
-	// } else {
-	// 	log.Printf("DEBUG: DB_PASSWORD: %s", dbPassword)
-	// }
-
-	// Initialize Firebase
-	// For local development, set GOOGLE_APPLICATION_CREDENTIALS to the path of your service account key JSON file.
-	// For Cloud Run, ensure the Cloud Run service account has necessary permissions for Firestore.
-	// The FIREBASE_PROJECT_ID environment variable should be set.
-	serviceAccountJSONPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") // Optional: for local dev
-	projectID := os.Getenv("GCP_PROJECT") // Cloud Run will set this, or use gcloud config get-value project
+	serviceAccountJSONPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+	projectID := os.Getenv("GCP_PROJECT")
 	if projectID == "" {
 		projectID = "drivegallery-460509" // Fallback for local testing if GCP_PROJECT is not set
 	}
@@ -49,28 +32,19 @@ func main() {
 	err := backend.InitFirebase(ctx, projectID, serviceAccountJSONPath)
 	if err != nil {
 		log.Printf("ERROR: Unable to initialize Firebase: %v. Exiting in 30s.", err)
-		time.Sleep(30 * time.Second) // Give time to view logs
-		os.Exit(1)
-	}
-	// defer backend.Client.Close() // Close Firestore client when main exits - Client.Close() is available from v1.9.0
-
-	// Initialize Google Drive Service using Service Account
-	// For Cloud Run, this will use the attached service account.
-	// For local development, ensure GOOGLE_APPLICATION_CREDENTIALS is set or gcloud auth application-default login has been run.
-	err = backend.InitDriveService(serviceAccountJSONPath) // Pass the service account JSON path
-	if err != nil {
-		log.Printf("ERROR: Unable to initialize Drive service: %v. Exiting in 30s.", err)
-		time.Sleep(30 * time.Second) // Give time to view logs
+		time.Sleep(30 * time.Second)
 		os.Exit(1)
 	}
 
 	// Set up HTTP routes
 	http.HandleFunc("/api/folders", foldersHandler)
-	http.HandleFunc("/api/files/", filesHandler)            // Note the trailing slash for path prefix matching
-	http.HandleFunc("/api/folder-name/", folderNameHandler) // New handler for folder names
+	http.HandleFunc("/api/files/", filesHandler)
+	http.HandleFunc("/api/folder-name/", folderNameHandler)
 	http.HandleFunc("/api/profiles", profilesHandler)
-	http.HandleFunc("/api/profiles/", profileHandler) // For PUT /api/profiles/{id}
+	http.HandleFunc("/api/profiles/", profileHandler)
 	http.HandleFunc("/api/upload/icon", uploadIconHandler)
+	http.HandleFunc("/api/upload/file", uploadFileHandler) // New file upload handler
+	http.HandleFunc("/api/update/file-metadata", updateFileMetadataHandler) // New metadata update handler
 	http.HandleFunc("/webhook", webhookHandler)
 	http.HandleFunc("/ws", wsHandler)
 
@@ -90,10 +64,10 @@ func main() {
 
 func setCorsHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*") // Be more specific in production
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS") // Added PUT and DELETE
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Goog-Channel-ID, X-Goog-Resource-State, X-Goog-Resource-ID, X-Goog-Message-Number")
-	// Allow embedding from self, Vite dev server, and Google Drive
-	w.Header().Set("Content-Security-Policy", "frame-ancestors 'self' http://localhost:5173 https://drive.google.com;")
+	// Allow embedding from self, Vite dev server
+	w.Header().Set("Content-Security-Policy", "frame-ancestors 'self' http://localhost:5173;")
 }
 
 func foldersHandler(w http.ResponseWriter, r *http.Request) {
@@ -108,12 +82,13 @@ func foldersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	folders, err := backend.ListFoldersInRootFolder(backend.DriveService) // Use backend.DriveService
+	ctx := r.Context()
+	folders, err := backend.ListFoldersFromFirestore(ctx)
 	if err != nil {
-		log.Printf("Error listing root folders: %v", err)
+		log.Printf("Error listing folders from Firestore: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unable to list root folders: %v", err)})
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unable to list folders: %v", err)})
 		return
 	}
 
@@ -134,23 +109,19 @@ func filesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract folderID from path: /api/files/{folderId}
-	// Example: /api/files/someFolderIdHere
-	// TrimPrefix will remove "/api/files/" leaving "someFolderIdHere"
-	// If the path was /api/files/someFolderIdHere/anythingelse, parts would be ["someFolderIdHere", "anythingelse"]
-	// We only care about the first part.
 	folderIDComponent := strings.TrimPrefix(r.URL.Path, "/api/files/")
-	if folderIDComponent == "" || strings.Contains(folderIDComponent, "/") { // Ensure it's a direct child and not empty
-		http.Error(w, "Folder ID is missing or invalid in path", http.StatusBadRequest)
+	if folderIDComponent == "" { // Allow '/' in folderIDComponent if it's part of the ID
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Folder ID is missing in path"})
 		return
 	}
 	folderID := folderIDComponent
 
-	// Parse query parameters for pagination
 	pageSizeStr := r.URL.Query().Get("pageSize")
-	pageToken := r.URL.Query().Get("pageToken")
+	lastDocID := r.URL.Query().Get("pageToken") // Use pageToken as lastDocID for Firestore pagination
 
-	var pageSize int64 = 100 // Default page size
+	var pageSize int64 = 100
 	if pageSizeStr != "" {
 		parsedSize, err := strconv.ParseInt(pageSizeStr, 10, 64)
 		if err == nil && parsedSize > 0 {
@@ -160,27 +131,23 @@ func filesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	filterType := r.URL.Query().Get("filter") // Get filter parameter
+	filterType := r.URL.Query().Get("filter")
 
-	files, nextPageToken, err := backend.ListFilesInFolder(backend.DriveService, folderID, pageSize, pageToken, filterType)
+	ctx := r.Context()
+	files, newLastDocID, err := backend.ListFilesFromFirestore(ctx, folderID, pageSize, lastDocID, filterType)
 	if err != nil {
-		log.Printf("Error listing files for folder %s: %v", folderID, err)
+		log.Printf("Error listing files for folder %s from Firestore: %v", folderID, err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unable to list files: %v", err)})
 		return
 	}
 
-	// Log MIME types for debugging
-	for _, file := range files {
-		log.Printf("Backend: File Name: %s, MIME Type: %s", file.Name, file.MimeType)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"data":          files,
-		"nextPageToken": nextPageToken,
+		"nextPageToken": newLastDocID, // Return newLastDocID as nextPageToken
 	})
 }
 
@@ -190,16 +157,10 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	// Assuming backend.WebhookHandler handles its own method checks if necessary
 	backend.WebhookHandler(w, r)
 }
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
-	// WebSocket upgrader handles CORS checks via CheckOrigin in backend.ServeWs
-	// No need to call setCorsHeaders(w) here if CheckOrigin is restrictive enough.
-	// However, if ServeWs doesn't handle OPTIONS or if there are other preflight concerns,
-	// you might need more complex logic or ensure CheckOrigin allows OPTIONS.
-	// For simplicity, assuming ServeWs and its upgrader manage this.
 	backend.ServeWs(w, r)
 }
 
@@ -216,15 +177,18 @@ func folderNameHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	folderIDComponent := strings.TrimPrefix(r.URL.Path, "/api/folder-name/")
-	if folderIDComponent == "" || strings.Contains(folderIDComponent, "/") {
-		http.Error(w, "Folder ID is missing or invalid in path", http.StatusBadRequest)
+	if folderIDComponent == "" { // Allow '/' in folderIDComponent if it's part of the ID
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Folder ID is missing in path"})
 		return
 	}
 	folderID := folderIDComponent
 
-	folderName, err := backend.GetFolderName(backend.DriveService, folderID)
+	ctx := r.Context()
+	folderName, err := backend.GetFolderNameFromFirestore(ctx, folderID)
 	if err != nil {
-		log.Printf("Error retrieving folder name for ID %s: %v", folderID, err)
+		log.Printf("Error retrieving folder name for ID %s from Firestore: %v", folderID, err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Unable to retrieve folder name: %v", err)})
@@ -236,16 +200,13 @@ func folderNameHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"name": folderName})
 }
 
-// Profile represents a member's profile (re-declared for handler scope, or import backend.Profile)
-// For simplicity, we'll use backend.Profile directly.
-
 func profilesHandler(w http.ResponseWriter, r *http.Request) {
 	setCorsHeaders(w)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	ctx := r.Context() // Use request context
+	ctx := r.Context()
 
 	switch r.Method {
 	case http.MethodGet:
@@ -263,15 +224,13 @@ func profilesHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		// IconURL might come from a separate upload step or be included here
-		// For now, assume it's part of the profile struct if provided
 		id, err := backend.CreateProfile(ctx, profile)
 		if err != nil {
 			log.Printf("Error creating profile: %v", err)
 			http.Error(w, "Unable to create profile", http.StatusInternalServerError)
 			return
 		}
-		profile.ID = id // Firestore returns string ID
+		profile.ID = id
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(profile)
@@ -286,10 +245,8 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	ctx := r.Context() // Use request context
+	ctx := r.Context()
 
-	// Extract profile ID from path: /api/profiles/{id}
-	// For Firestore, ID is a string
 	profileID := strings.TrimPrefix(r.URL.Path, "/api/profiles/")
 	if profileID == "" {
 		http.Error(w, "Profile ID is missing in path", http.StatusBadRequest)
@@ -297,7 +254,7 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
-	case http.MethodGet: // Added GET /api/profiles/{id}
+	case http.MethodGet:
 		profile, err := backend.GetProfile(ctx, profileID)
 		if err != nil {
 			log.Printf("Error getting profile %s: %v", profileID, err)
@@ -317,7 +274,6 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		// profileData.ID will be ignored by UpdateProfile, profileID from path is used.
 
 		if err := backend.UpdateProfile(ctx, profileID, profileData); err != nil {
 			log.Printf("Error updating profile %s: %v", profileID, err)
@@ -328,10 +284,9 @@ func profileHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"message": "Profile updated successfully"})
 
-	case http.MethodDelete: // Added DELETE /api/profiles/{id}
+	case http.MethodDelete:
 		if err := backend.DeleteProfile(ctx, profileID); err != nil {
 			log.Printf("Error deleting profile %s: %v", profileID, err)
-			// Consider if not found should be a different status code or handled as success
 			http.Error(w, "Unable to delete profile", http.StatusInternalServerError)
 			return
 		}
@@ -356,35 +311,139 @@ func uploadIconHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse multipart form data, 10MB limit for file size
-	err := r.ParseMultipartForm(10 << 20) // 10 MB
+	err := r.ParseMultipartForm(10 << 20)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error parsing form: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	file, handler, err := r.FormFile("icon") // "icon" is the field name for the file input
+	file, handler, err := r.FormFile("icon")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error retrieving file from form: %v", err), http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
 
-	fileBytes, err := ioutil.ReadAll(file)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading file: %v", err), http.StatusInternalServerError)
+	profileID := r.FormValue("profile_id")
+	if profileID == "" {
+		http.Error(w, "Profile ID is missing in form data", http.StatusBadRequest)
 		return
 	}
 
-	// Upload to Google Drive
-	webViewLink, err := backend.UploadFileToDrive(backend.DriveService, handler.Filename, handler.Header.Get("Content-Type"), fileBytes)
+	ctx := r.Context()
+	iconURL, err := backend.UploadProfileIcon(ctx, profileID, file, handler.Filename, handler.Header.Get("Content-Type"))
 	if err != nil {
-		log.Printf("Error uploading file to Drive: %v", err)
-		http.Error(w, "Error uploading file to Google Drive", http.StatusInternalServerError)
+		log.Printf("Error uploading icon to Firebase Storage: %v", err)
+		http.Error(w, "Error uploading icon to Firebase Storage", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"icon_url": webViewLink})
+	json.NewEncoder(w).Encode(map[string]string{"icon_url": iconURL})
+}
+
+// uploadFileHandler handles file uploads to Firebase Storage and saves metadata to Firestore.
+func uploadFileHandler(w http.ResponseWriter, r *http.Request) {
+	setCorsHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse multipart form, 10MB limit for file size
+	err := r.ParseMultipartForm(10 << 20) // 10 MB
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error parsing form: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file") // "file" is the expected form field name for the file
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error retrieving file from form: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	folderName := r.FormValue("folder_name")     // "folder_name" is the expected form field name for the folder name
+	relativePath := r.FormValue("relative_path") // "relative_path" is the expected form field name for the relative path
+	mimeType := r.FormValue("mime_type")         // "mime_type" is the expected form field name for the MIME type
+
+	if folderName == "" {
+		http.Error(w, "Folder name is missing in form data", http.StatusBadRequest)
+		return
+	}
+	if relativePath == "" {
+		http.Error(w, "Relative path is missing in form data", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	// Read file content into a byte slice
+	fileContent, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error reading file content: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// If mimeType is not provided by the client, try to detect it from the file content
+	if mimeType == "" {
+		mimeType = http.DetectContentType(fileContent)
+	}
+
+	downloadURL, err := backend.UploadFileToStorageAndFirestore(ctx, folderName, relativePath, mimeType, fileContent)
+	if err != nil {
+		log.Printf("Error uploading file to Firebase Storage and Firestore: %v", err)
+		http.Error(w, "Error uploading file to Firebase Storage and Firestore", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"download_url": downloadURL})
+}
+
+// updateFileMetadataHandler handles requests to update file metadata in Firestore.
+func updateFileMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	setCorsHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var requestBody struct {
+		ID       string `json:"id"`
+		MimeType string `json:"mime_type"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if requestBody.ID == "" || requestBody.MimeType == "" {
+		http.Error(w, "Missing file ID or mime type in request body", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	err := backend.UpdateFileMetadata(ctx, requestBody.ID, requestBody.MimeType)
+	if err != nil {
+		log.Printf("Error updating file metadata: %v", err)
+		http.Error(w, "Error updating file metadata", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "File metadata updated successfully"})
 }
