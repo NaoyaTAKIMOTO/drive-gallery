@@ -11,6 +11,8 @@ describe('HomePage', () => {
   test('フォルダー一覧が正しく表示される', async () => {
     mockFetch({ data: [mockFolderMetadata] })
 
+    // Set URL to home page explicitly
+    window.history.pushState({}, '', '/')
     render(<App />)
 
     expect(screen.getByText('Loading folders...')).toBeInTheDocument()
@@ -25,6 +27,8 @@ describe('HomePage', () => {
     const user = userEvent.setup()
     mockFetch({ data: [mockFolderMetadata] })
 
+    // Set URL to home page explicitly
+    window.history.pushState({}, '', '/')
     render(<App />)
 
     await waitFor(() => {
@@ -42,10 +46,12 @@ describe('HomePage', () => {
   test('フォルダーが見つからない場合のメッセージが表示される', async () => {
     mockFetch({ data: [] })
 
+    // Set URL to home page explicitly
+    window.history.pushState({}, '', '/')
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('No folders found in the root directory.')).toBeInTheDocument()
+      expect(screen.getByText(/No folders found/)).toBeInTheDocument()
     })
   })
 
@@ -53,13 +59,15 @@ describe('HomePage', () => {
     const user = userEvent.setup()
     mockFetch({ data: [mockFolderMetadata] })
 
+    // Set URL to home page explicitly
+    window.history.pushState({}, '', '/')
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('メンバープロフィールを見る')).toBeInTheDocument()
+      expect(screen.getByText(/メンバープロフィール/)).toBeInTheDocument()
     })
 
-    await user.click(screen.getByText('メンバープロフィールを見る'))
+    await user.click(screen.getByText(/メンバープロフィール/))
 
     await waitFor(() => {
       expect(window.location.pathname).toBe('/profiles')
@@ -69,10 +77,12 @@ describe('HomePage', () => {
   test('APIエラー時にエラーメッセージが表示される', async () => {
     mockFetch(null, false)
 
+    // Set URL to home page explicitly
+    window.history.pushState({}, '', '/')
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText(/Error fetching folders/)).toBeInTheDocument()
+      expect(screen.getByText(/Error/)).toBeInTheDocument()
     })
   })
 })

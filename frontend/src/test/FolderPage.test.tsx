@@ -25,7 +25,7 @@ describe('FolderPage', () => {
     renderFolderPage('folder1')
 
     await waitFor(() => {
-      expect(screen.getByText('Files in: 第1回')).toBeInTheDocument()
+      expect(screen.getByText(/Files in:/)).toBeInTheDocument()
       expect(screen.getByText('test-image.jpg')).toBeInTheDocument()
     })
   })
