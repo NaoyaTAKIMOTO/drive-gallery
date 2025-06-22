@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -298,8 +299,8 @@ func isValidWebSocketMessage(message []byte) bool {
 	}
 	
 	// 簡単なJSON検証（実際の実装では json.Valid を使用）
-	str := string(message)
-	return strings.HasPrefix(str, "{") && strings.HasSuffix(str, "}")
+	var js json.RawMessage
+	return json.Unmarshal(message, &js) == nil
 }
 
 func TestWebSocketConnectionLimit(t *testing.T) {

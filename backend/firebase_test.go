@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -170,7 +171,8 @@ func TestGenerateFileHash(t *testing.T) {
 func generateFileHash(data []byte) string {
 	// 実際の実装では crypto/sha256 を使用
 	// ここではテスト用の簡単な実装
-	return "mocked_hash_" + string(rune(len(data)))
+	hash := fmt.Sprintf("%064x", len(data)*12345+int(data[0]))
+	return hash
 }
 
 func TestValidateImageMimeType(t *testing.T) {
@@ -323,5 +325,5 @@ func TestGenerateUniqueID(t *testing.T) {
 func generateUniqueID() string {
 	// 実際の実装では github.com/google/uuid を使用
 	// ここではテスト用の簡単な実装
-	return "test-uuid-" + string(rune(time.Now().UnixNano()%1000))
+	return fmt.Sprintf("test-uuid-%d", time.Now().UnixNano())
 }
