@@ -187,8 +187,11 @@ a:hover {
 
 /* Pagination Controls */
 .pagination-controls {
-  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   margin-top: 30px;
+  gap: 10px;
 }
 
 .pagination-controls button {
@@ -196,10 +199,10 @@ a:hover {
   color: white;
   border: none;
   padding: 10px 20px;
-  margin: 0 10px;
   border-radius: 5px;
   cursor: pointer;
   transition: background-color 0.3s ease;
+  font-size: 1em;
 }
 
 .pagination-controls button:disabled {
@@ -209,6 +212,50 @@ a:hover {
 
 .pagination-controls button:hover:not(:disabled) {
   background-color: #2980b9;
+}
+
+.page-numbers {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.page-numbers button {
+  min-width: 40px;
+  padding: 8px 12px;
+  font-size: 0.9em;
+  background-color: #ecf0f1;
+  color: #2c3e50;
+  border: 1px solid #bdc3c7;
+}
+
+.page-numbers button:hover:not(:disabled) {
+  background-color: #d5dbdb;
+  border-color: #95a5a6;
+}
+
+.page-numbers button.active {
+  background-color: #3498db;
+  color: white;
+  border-color: #2980b9;
+}
+
+.page-numbers button:disabled {
+  background-color: #3498db;
+  color: white;
+  border-color: #2980b9;
+  cursor: default;
+}
+
+.page-numbers button.unknown {
+  background-color: #f8f9fa;
+  color: #6c757d;
+  border-color: #dee2e6;
+}
+
+.page-numbers button.unknown:hover:not(:disabled) {
+  background-color: #e9ecef;
+  border-color: #adb5bd;
 }
 
 /* Video Player Styles */

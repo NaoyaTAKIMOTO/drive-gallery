@@ -98,7 +98,8 @@ function FolderPage() {
   const [previousPageTokens, setPreviousPageTokens] = useState<string[]>(['']);
   const [currentPageNumber, setCurrentPageNumber] = useState<number>(1);
   const [pageTokenMap, setPageTokenMap] = useState<Map<number, string>>(new Map([[1, '']]));
-  const [totalPages, setTotalPages] = useState<number>(1);
+  const [estimatedTotalPages, setEstimatedTotalPages] = useState<number>(5); // Show 5 pages initially
+  const [isNavigating, setIsNavigating] = useState<boolean>(false);
   const pageSize = 20;
 
   // Helper function to determine file type
@@ -169,6 +170,12 @@ function FolderPage() {
   // Extract files and nextPageToken from the data
   const files = data?.data || [];
   const nextPageToken = data?.nextPageToken || '';
+  
+  // Estimate total pages based on current page and whether there's a next page
+  const currentEstimatedPages = Math.max(
+    estimatedTotalPages,
+    currentPageNumber + (nextPageToken ? 1 : 0)
+  );
 
   const handleNextPage = () => {
     if (nextPageToken) {
@@ -180,9 +187,9 @@ function FolderPage() {
       // Update page token map
       setPageTokenMap(prev => new Map(prev).set(nextPageNum, nextPageToken));
       
-      // Update total pages if we go beyond current known pages
-      if (nextPageNum > totalPages) {
-        setTotalPages(nextPageNum);
+      // Update estimated total pages if we go beyond current known pages
+      if (nextPageNum > estimatedTotalPages) {
+        setEstimatedTotalPages(nextPageNum + 2); // Add buffer for more pages
       }
     }
   };
@@ -197,8 +204,8 @@ function FolderPage() {
     }
   };
 
-  const handlePageClick = (pageNumber: number) => {
-    if (pageNumber === currentPageNumber) return;
+  const handlePageClick = async (pageNumber: number) => {
+    if (pageNumber === currentPageNumber || isNavigating) return;
     
     const token = pageTokenMap.get(pageNumber);
     if (token !== undefined) {
@@ -216,17 +223,78 @@ function FolderPage() {
       }
       setPreviousPageTokens(newPreviousTokens);
     } else {
-      // We don't have the token, need to navigate sequentially
-      if (pageNumber > currentPageNumber) {
-        // Navigate forward page by page
-        handleNextPage();
-        // TODO: Could implement recursive navigation for multiple pages
-      } else {
-        // Navigate backward page by page
-        handlePreviousPage();
-        // TODO: Could implement recursive navigation for multiple pages
+      // We don't have the token, need to navigate sequentially to build the token map
+      setIsNavigating(true);
+      try {
+        if (pageNumber > currentPageNumber) {
+          // Navigate forward to build token map until we reach the target page
+          await navigateForwardTo(pageNumber);
+        } else {
+          // Navigate backward (already have these tokens)
+          navigateBackwardTo(pageNumber);
+        }
+      } finally {
+        setIsNavigating(false);
       }
     }
+  };
+
+  const navigateForwardTo = async (targetPage: number) => {
+    let currentPage = currentPageNumber;
+    let currentToken = currentPageToken;
+    let previousTokens = [...previousPageTokens];
+    let tokenMap = new Map(pageTokenMap);
+    
+    while (currentPage < targetPage) {
+      // Fetch next page to get the token
+      if (!folderId) return;
+      let url = `${import.meta.env.VITE_API_BASE_URL}/api/files/${folderId}?pageSize=${pageSize}&pageToken=${currentToken}`;
+      if (filter !== 'all') {
+        url += `&filter=${filter}`;
+      }
+      
+      try {
+        const response = await fetch(url);
+        if (!response.ok) break;
+        
+        const result = await response.json();
+        const nextToken = result.nextPageToken || '';
+        
+        if (nextToken) {
+          const nextPage = currentPage + 1;
+          previousTokens.push(currentToken);
+          tokenMap.set(nextPage, nextToken);
+          currentPage = nextPage;
+          currentToken = nextToken;
+        } else {
+          break; // No more pages
+        }
+      } catch (error) {
+        console.error('Error fetching page:', error);
+        break;
+      }
+    }
+    
+    // Update all states
+    setCurrentPageToken(currentToken);
+    setCurrentPageNumber(currentPage);
+    setPreviousPageTokens(previousTokens);
+    setPageTokenMap(tokenMap);
+  };
+
+  const navigateBackwardTo = (targetPage: number) => {
+    if (targetPage < 1) return;
+    
+    const token = pageTokenMap.get(targetPage) || '';
+    setCurrentPageToken(token);
+    setCurrentPageNumber(targetPage);
+    
+    // Rebuild previousPageTokens
+    const newPreviousTokens: string[] = [''];
+    for (let i = 2; i <= targetPage; i++) {
+      newPreviousTokens.push(pageTokenMap.get(i - 1) || '');
+    }
+    setPreviousPageTokens(newPreviousTokens);
   };
 
   const hasNextPage = !!nextPageToken;
@@ -428,9 +496,33 @@ function FolderPage() {
       <p className="breadcrumb-link"><Link to="/">↩ Back to Folders</Link></p>
 
       <div className="filter-buttons">
-        <button onClick={() => setFilter('all')} className={filter === 'all' ? 'active' : ''}>すべて</button>
-        <button onClick={() => setFilter('image')} className={filter === 'image' ? 'active' : ''}>写真 📷</button>
-        <button onClick={() => setFilter('video')} className={filter === 'video' ? 'active' : ''}>動画 🎥</button>
+        <button onClick={() => {
+          setFilter('all');
+          // Reset pagination when filter changes
+          setCurrentPageToken('');
+          setPreviousPageTokens(['']);
+          setCurrentPageNumber(1);
+          setPageTokenMap(new Map([[1, '']]));
+          setEstimatedTotalPages(5);
+        }} className={filter === 'all' ? 'active' : ''}>すべて</button>
+        <button onClick={() => {
+          setFilter('image');
+          // Reset pagination when filter changes
+          setCurrentPageToken('');
+          setPreviousPageTokens(['']);
+          setCurrentPageNumber(1);
+          setPageTokenMap(new Map([[1, '']]));
+          setEstimatedTotalPages(5);
+        }} className={filter === 'image' ? 'active' : ''}>写真 📷</button>
+        <button onClick={() => {
+          setFilter('video');
+          // Reset pagination when filter changes
+          setCurrentPageToken('');
+          setPreviousPageTokens(['']);
+          setCurrentPageNumber(1);
+          setPageTokenMap(new Map([[1, '']]));
+          setEstimatedTotalPages(5);
+        }} className={filter === 'video' ? 'active' : ''}>動画 🎥</button>
       </div>
 
       {/* File Upload Section */}
@@ -485,6 +577,27 @@ function FolderPage() {
       {/* Pagination Controls */}
       <div className="pagination-controls">
         <button onClick={handlePreviousPage} disabled={!hasPreviousPage}>前へ</button>
+        
+        <div className="page-numbers">
+          {Array.from({ length: currentEstimatedPages }, (_, i) => i + 1).map(pageNum => {
+            const hasToken = pageTokenMap.has(pageNum);
+            const isCurrentPage = pageNum === currentPageNumber;
+            const isDisabled = isCurrentPage || (isNavigating && !hasToken);
+            
+            return (
+              <button
+                key={pageNum}
+                onClick={() => handlePageClick(pageNum)}
+                className={isCurrentPage ? 'active' : (!hasToken ? 'unknown' : '')}
+                disabled={isDisabled}
+                title={!hasToken && pageNum > currentPageNumber ? 'クリックしてページを読み込み' : undefined}
+              >
+                {isNavigating && !hasToken && pageNum > currentPageNumber ? '...' : pageNum}
+              </button>
+            );
+          })}
+        </div>
+        
         <button onClick={handleNextPage} disabled={!hasNextPage}>次へ</button>
       </div>
     </div>
