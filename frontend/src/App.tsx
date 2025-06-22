@@ -242,8 +242,8 @@ function FolderPage() {
   const navigateForwardTo = async (targetPage: number) => {
     let currentPage = currentPageNumber;
     let currentToken = currentPageToken;
-    let previousTokens = [...previousPageTokens];
-    let tokenMap = new Map(pageTokenMap);
+    const previousTokens = [...previousPageTokens];
+    const tokenMap = new Map(pageTokenMap);
     
     while (currentPage < targetPage) {
       // Fetch next page to get the token
@@ -356,7 +356,7 @@ function FolderPage() {
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
-      const webkitRelativePath = (file as any).webkitRelativePath || file.name; // Fallback to file.name if webkitRelativePath is not available
+      const webkitRelativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name; // Fallback to file.name if webkitRelativePath is not available
 
       // Extract the top-level folder name from webkitRelativePath
       let folderName = '';
@@ -528,7 +528,7 @@ function FolderPage() {
       {/* File Upload Section */}
       {/* File Upload Section */}
       <div className="file-upload-section">
-        {/* @ts-ignore */}
+        {/* @ts-expect-error webkitdirectory is not in standard HTML input attributes */}
         <input type="file" onChange={handleFileChange} webkitdirectory="true" directory="true" multiple />
         <button 
           onClick={handleUploadAllFiles} 
@@ -922,4 +922,5 @@ function App() {
   );
 }
 
-export default App;
+export default App
+export { App }

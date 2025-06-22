@@ -1,0 +1,170 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  frontend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install frontend dependencies
+      run: cd frontend && npm ci
+    
+    - name: Run frontend linter
+      run: cd frontend && npm run lint
+    
+    - name: Run frontend unit tests
+      run: cd frontend && npm run test:run
+    
+    - name: Run frontend build
+      run: cd frontend && npm run build
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Download Go dependencies
+      run: go mod download
+    
+    - name: Run Go vet
+      run: go vet ./...
+    
+    - name: Run Go tests
+      run: go test -v ./...
+    
+    - name: Run Go build
+      run: go build -v ./...
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    needs: [frontend-tests, backend-tests]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    
+    - name: Install frontend dependencies
+      run: cd frontend && npm ci
+    
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps
+    
+    - name: Build frontend
+      run: cd frontend && npm run build
+    
+    - name: Download Go dependencies
+      run: go mod download
+    
+    - name: Create test environment file
+      run: |
+        cat > .env << EOF
+        GCP_PROJECT=test-project
+        FIREBASE_STORAGE_BUCKET=test-bucket
+        PORT=8080
+        EOF
+    
+    - name: Run E2E tests
+      run: npx playwright test
+      env:
+        CI: true
+    
+    - name: Upload Playwright report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 30
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  dependency-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install frontend dependencies
+      run: cd frontend && npm ci
+    
+    - name: Run npm audit
+      run: cd frontend && npm audit --audit-level=moderate
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    
+    - name: Download Go dependencies
+      run: go mod download
+    
+    - name: Run Nancy (Go vulnerability scanner)
+      run: |
+        go install github.com/sonatypecommunity/nancy@latest
+        go list -json -deps ./... | nancy sleuth

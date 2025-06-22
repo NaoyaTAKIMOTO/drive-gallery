@@ -1,4 +1,4 @@
-.PHONY: frontend-build backend-deploy firebase-deploy deploy clean run-local-backend run-local-frontend run-local
+.PHONY: frontend-build backend-deploy firebase-deploy deploy clean run-local-backend run-local-frontend run-local test test-frontend test-backend test-e2e test-essential test-quick install-hooks
 
 # Load environment variables from .env file
 include .env
@@ -45,3 +45,59 @@ run-local: run-local-backend run-local-frontend
 	# You might need to open two separate terminals and run each command manually
 	# if you need to see their respective outputs or manage them independently.
 	# For simplicity, we'll just list them here.
+
+test: test-frontend test-backend
+	@echo "--- All tests completed ---"
+
+test-frontend:
+	@echo "--- Running frontend tests ---"
+	cd frontend && npm run test:run
+
+test-backend:
+	@echo "--- Running backend tests ---"
+	go test -v ./...
+
+test-e2e:
+	@echo "--- Running E2E tests ---"
+	npm run test:e2e
+
+test-coverage:
+	@echo "--- Running tests with coverage ---"
+	cd frontend && npm run test:coverage
+	go test -v -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
+test-essential:
+	@echo "--- Running essential tests (for pre-push) ---"
+	@echo "🧪 Frontend unit tests..."
+	cd frontend && npm run test:run
+	@echo "🧪 Backend unit tests..."
+	go test ./... -short
+
+test-quick:
+	@echo "--- Running quick tests ---"
+	@echo "🧪 Frontend lint..."
+	cd frontend && npm run lint
+	@echo "🧪 Backend vet..."
+	go vet ./...
+	@echo "🧪 Backend build check..."
+	go build -v ./...
+
+install-hooks:
+	@echo "--- Installing Git hooks ---"
+	@if [ ! -f .git/hooks/pre-push ]; then \
+		echo "Installing pre-push hook..."; \
+		cp scripts/pre-push .git/hooks/pre-push; \
+		chmod +x .git/hooks/pre-push; \
+		echo "✅ Pre-push hook installed"; \
+	else \
+		echo "✅ Pre-push hook already exists"; \
+	fi
+	@if [ ! -f .git/hooks/pre-commit ]; then \
+		echo "Installing pre-commit hook..."; \
+		cp scripts/pre-commit .git/hooks/pre-commit; \
+		chmod +x .git/hooks/pre-commit; \
+		echo "✅ Pre-commit hook installed"; \
+	else \
+		echo "✅ Pre-commit hook already exists"; \
+	fi

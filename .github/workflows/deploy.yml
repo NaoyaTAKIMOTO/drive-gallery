@@ -1,0 +1,97 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+    
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+    
+    - name: Configure Docker to use gcloud as credential helper
+      run: gcloud auth configure-docker
+    
+    - name: Build and deploy to Cloud Run
+      run: |
+        gcloud run deploy drive-gallery-backend \
+          --source . \
+          --platform managed \
+          --region asia-northeast1 \
+          --allow-unauthenticated \
+          --set-env-vars="GCP_PROJECT=${{ secrets.GCP_PROJECT }}" \
+          --set-env-vars="FIREBASE_STORAGE_BUCKET=${{ secrets.FIREBASE_STORAGE_BUCKET }}"
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install frontend dependencies
+      run: cd frontend && npm ci
+    
+    - name: Create frontend environment file
+      run: |
+        cd frontend
+        cat > .env.production << EOF
+        VITE_API_BASE_URL=${{ secrets.BACKEND_URL }}
+        EOF
+    
+    - name: Build frontend
+      run: cd frontend && npm run build
+    
+    - name: Setup Firebase CLI
+      run: npm install -g firebase-tools
+    
+    - name: Deploy to Firebase Hosting
+      run: |
+        firebase deploy --only hosting --token ${{ secrets.FIREBASE_TOKEN }} --project ${{ secrets.FIREBASE_PROJECT_ID }}
+      env:
+        FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+  notify-deployment:
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    if: always() && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Notify deployment status
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+      if: always()
